@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>PrepPilot AI — Your Exam Prep Co-Pilot</title>
-<meta name="description" content="AI-powered exam preparation platform — study planner, MCQ practice, analytics and vacancy tracker in one place." />
+<meta name="description" content="AI-powered exam preparation platform — study planner, MCQ practice, analytics, and spoken English practice for Data Analyst prep." />
 <meta name="theme-color" content="#6C5CE7" />
 <link rel="manifest" href="manifest.json" />
 <link rel="apple-touch-icon" href="icons/icon-192.png" />
@@ -85,10 +85,11 @@
   <nav class="nav" id="main-nav">
     <button class="nav-item active" data-view="dashboard"><span>🏠</span><small>Home</small></button>
     <button class="nav-item" data-view="planner"><span>🗓️</span><small>Planner</small></button>
+    <button class="nav-item" data-view="checklist"><span>📋</span><small>Checklist</small></button>
     <button class="nav-item" data-view="resources"><span>📚</span><small>Resources</small></button>
     <button class="nav-item" data-view="mcq"><span>📝</span><small>MCQ</small></button>
     <button class="nav-item" data-view="progress"><span>📈</span><small>Progress</small></button>
-    <button class="nav-item" data-view="vacancy"><span>🏛️</span><small>Vacancy</small></button>
+    <button class="nav-item" data-view="speaking"><span>🎙️</span><small>Speaking</small></button>
     <button class="nav-item" data-view="notes"><span>🗒️</span><small>Notes</small></button>
     <button class="nav-item hidden" id="admin-nav-btn" data-view="admin"><span>🛠️</span><small>Admin</small></button>
   </nav>
@@ -180,6 +181,21 @@
       </div>
     </section>
 
+    <!-- ---------- MASTER CHECKLIST ---------- -->
+    <section class="view" id="view-checklist">
+      <h2 class="view-title">Master Checklist</h2>
+      <p class="muted checklist-subtitle">KREIS RPC Computer Teacher syllabus — tap a topic to log video/PDF/notes, MCQs, revisions, confidence &amp; time.</p>
+
+      <div class="card glass" id="checklist-summary-card">
+        <div class="p-label"><span>Overall progress</span><span id="checklist-overall-text">0 / 0</span></div>
+        <div class="progress-bar-bg"><div class="progress-bar-fill" id="checklist-overall-fill" style="width:0%"></div></div>
+      </div>
+
+      <input type="search" id="checklist-search" class="full-width-input" placeholder="Search a topic (e.g. Pointers, DBMS, Joins)…" />
+
+      <div id="checklist-sections"></div>
+    </section>
+
     <!-- ---------- RESOURCES ---------- -->
     <section class="view" id="view-resources">
       <h2 class="view-title">Resources Library</h2>
@@ -251,11 +267,43 @@
       </div>
     </section>
 
-    <!-- ---------- VACANCY TRACKER ---------- -->
-    <section class="view" id="view-vacancy">
-      <h2 class="view-title">Vacancy Tracker</h2>
-      <input type="search" id="vacancy-search" placeholder="Search government jobs…" class="full-width-input" />
-      <div class="vacancy-list" id="vacancy-list"></div>
+    <!-- ---------- SPEAKING PRACTICE ---------- -->
+    <section class="view" id="view-speaking">
+      <h2 class="view-title">Speaking Practice</h2>
+      <p class="muted checklist-subtitle">Pick a prompt, record your answer with your mic, and play it back to hear yourself.</p>
+
+      <div class="card glass">
+        <label>Category
+          <select id="sp-category"><option value="">All categories</option></select>
+        </label>
+        <div id="sp-prompt-card" class="sp-prompt-box">
+          <p class="muted">Choose a category to load a prompt, or tap "Next prompt".</p>
+        </div>
+        <div class="form-row">
+          <button class="btn btn-ghost" id="sp-next-btn" type="button">🔀 Next prompt</button>
+        </div>
+      </div>
+
+      <div class="card glass sp-record-card">
+        <div class="sp-record-row">
+          <button class="sp-mic-btn" id="sp-record-btn" type="button">🎙️</button>
+          <div>
+            <p class="sp-record-status" id="sp-status">Tap the mic to start recording</p>
+            <p class="sp-timer" id="sp-rec-timer">00:00</p>
+          </div>
+        </div>
+        <audio id="sp-playback" controls class="hidden"></audio>
+        <div class="form-row hidden" id="sp-save-row">
+          <button class="btn btn-primary" id="sp-save-btn">💾 Save recording</button>
+          <button class="btn btn-ghost" id="sp-discard-btn">Discard &amp; re-record</button>
+        </div>
+        <p class="auth-msg" id="sp-msg"></p>
+      </div>
+
+      <div class="card glass">
+        <h3>My recordings</h3>
+        <div id="sp-recordings-list"></div>
+      </div>
     </section>
 
     <!-- ---------- NOTES ---------- -->
@@ -280,13 +328,14 @@
         <div class="card glass stat-card"><span class="stat-icon">👥</span><div><p class="stat-value" id="admin-stat-users">—</p><p class="stat-label">Users</p></div></div>
         <div class="card glass stat-card"><span class="stat-icon">📚</span><div><p class="stat-value" id="admin-stat-resources">—</p><p class="stat-label">Resources</p></div></div>
         <div class="card glass stat-card"><span class="stat-icon">📝</span><div><p class="stat-value" id="admin-stat-mcqs">—</p><p class="stat-label">MCQs</p></div></div>
-        <div class="card glass stat-card"><span class="stat-icon">🏛️</span><div><p class="stat-value" id="admin-stat-vacancies">—</p><p class="stat-label">Vacancies</p></div></div>
+        <div class="card glass stat-card"><span class="stat-icon">🎙️</span><div><p class="stat-value" id="admin-stat-prompts">—</p><p class="stat-label">Speaking Prompts</p></div></div>
+        <div class="card glass stat-card"><span class="stat-icon">🔊</span><div><p class="stat-value" id="admin-stat-recordings">—</p><p class="stat-label">Recordings</p></div></div>
       </div>
 
       <div class="admin-tabs">
         <button class="admin-tab active" data-admin-tab="resources">📚 Notes &amp; Resources</button>
         <button class="admin-tab" data-admin-tab="mcqs">📝 MCQs</button>
-        <button class="admin-tab" data-admin-tab="vacancies">🏛️ Vacancies</button>
+        <button class="admin-tab" data-admin-tab="prompts">🎙️ Speaking Prompts</button>
       </div>
 
       <!-- Resources / Notes manager -->
@@ -364,41 +413,74 @@
         </div>
       </div>
 
-      <!-- Vacancy manager -->
-      <div class="admin-panel" id="admin-panel-vacancies">
+      <!-- Speaking Prompts manager -->
+      <div class="admin-panel" id="admin-panel-prompts">
         <div class="card glass">
-          <h3 id="vac-form-title">Add a vacancy</h3>
-          <form id="admin-vacancy-form" class="inline-form-col">
-            <input type="hidden" id="av-id" />
-            <input type="text" id="av-title" placeholder="Post title" required />
+          <h3 id="prompt-form-title">Add a speaking prompt</h3>
+          <form id="admin-prompt-form" class="inline-form-col">
+            <input type="hidden" id="ap-id" />
             <div class="form-row">
-              <input type="text" id="av-department" placeholder="Department" />
-              <input type="url" id="av-link" placeholder="Notification link" />
+              <input type="text" id="ap-category" placeholder="Category (e.g. Interview Answers)" required />
+              <select id="ap-difficulty">
+                <option>Easy</option><option selected>Medium</option><option>Hard</option>
+              </select>
             </div>
+            <textarea id="ap-prompt" rows="3" placeholder="Prompt text students will speak about…" required></textarea>
             <div class="form-row">
-              <input type="text" id="av-eligibility" placeholder="Eligibility" />
-              <input type="text" id="av-salary" placeholder="Salary" />
+              <button type="submit" class="btn btn-primary" id="ap-submit-btn">Add prompt</button>
+              <button type="button" class="btn btn-ghost admin-cancel-edit hidden" id="ap-cancel-btn">Cancel edit</button>
             </div>
-            <div class="form-row">
-              <input type="text" id="av-fees" placeholder="Fees" />
-              <input type="text" id="av-examdate" placeholder="Exam date (e.g. 2026-09-14)" />
-            </div>
-            <input type="text" id="av-lastdate" placeholder="Last date to apply" />
-            <div class="form-row">
-              <button type="submit" class="btn btn-primary" id="av-submit-btn">Add vacancy</button>
-              <button type="button" class="btn btn-ghost admin-cancel-edit hidden" id="av-cancel-btn">Cancel edit</button>
-            </div>
-            <p class="auth-msg" id="av-msg"></p>
+            <p class="auth-msg" id="ap-msg"></p>
           </form>
         </div>
         <div class="card glass">
-          <h3>All vacancies</h3>
-          <div id="admin-vacancy-table" class="admin-table"></div>
+          <h3>All prompts</h3>
+          <div id="admin-prompt-table" class="admin-table"></div>
         </div>
       </div>
     </section>
 
   </main>
+</div>
+
+<!-- Checklist topic detail modal -->
+<div class="modal-overlay hidden" id="checklist-modal">
+  <div class="modal glass checklist-modal">
+    <h3 id="cm-topic-title">Topic</h3>
+    <p class="r-topic" id="cm-topic-meta"></p>
+
+    <label class="checkbox-row"><input type="checkbox" id="cm-completed" /> Mark topic as complete</label>
+
+    <div class="cm-toggles">
+      <label class="checkbox-row"><input type="checkbox" id="cm-video" /> 🎥 Video watched</label>
+      <label class="checkbox-row"><input type="checkbox" id="cm-pdf" /> 📄 PDF read</label>
+      <label class="checkbox-row"><input type="checkbox" id="cm-notes" /> 📝 Notes created</label>
+    </div>
+
+    <div class="form-row">
+      <label>❓ MCQs attempted <input type="number" id="cm-mcq-attempted" min="0" /></label>
+      <label>✅ MCQs correct <input type="number" id="cm-mcq-correct" min="0" /></label>
+    </div>
+    <p class="muted" id="cm-accuracy">Accuracy: —</p>
+
+    <div class="cm-toggles">
+      <label class="checkbox-row"><input type="checkbox" id="cm-rev1" /> 🔄 Revision 1</label>
+      <label class="checkbox-row"><input type="checkbox" id="cm-rev2" /> 🔄 Revision 2</label>
+      <label class="checkbox-row"><input type="checkbox" id="cm-rev3" /> 🔄 Revision 3</label>
+    </div>
+
+    <label>⭐ Confidence
+      <div class="star-picker" id="cm-confidence-picker">
+        <span data-star="1">★</span><span data-star="2">★</span><span data-star="3">★</span><span data-star="4">★</span><span data-star="5">★</span>
+      </div>
+    </label>
+
+    <label>⏱ Time spent (minutes)<input type="number" id="cm-time" min="0" /></label>
+    <label>📝 Personal remarks<textarea id="cm-remarks" rows="3" placeholder="Anything to remember about this topic…"></textarea></label>
+
+    <button class="btn btn-primary" id="cm-save-btn">Save</button>
+    <button class="icon-btn modal-close" id="cm-close-btn">✕</button>
+  </div>
 </div>
 
 <!-- Note-reading modal (used by students to read in-app 'notes' resources) -->
