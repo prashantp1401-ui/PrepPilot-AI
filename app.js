@@ -23,6 +23,8 @@ document.addEventListener('DOMContentLoaded', () => {
   bindVacancy();
   bindNotes();
   bindProfile();
+  bindAdmin();
+  bindNoteReadModal();
 
   const saved = localStorage.getItem('preppilot_user');
   if (saved) {
@@ -129,11 +131,15 @@ async function enterApp() {
     fillSubjectSelects(State.subjects);
   }
 
+  const isAdmin = State.user.isAdmin === true || State.user.isAdmin === 'TRUE';
+  document.getElementById('admin-nav-btn').classList.toggle('hidden', !isAdmin);
+
   loadDashboard();
 }
 
 function fillSubjectSelects(subjects) {
-  const selects = ['new-task-subject', 'resource-subject-filter', 'mcq-subject', 'note-subject'];
+  const selects = ['new-task-subject', 'resource-subject-filter', 'mcq-subject', 'note-subject',
+                    'ar-subject', 'am-subject'];
   selects.forEach((id) => {
     const el = document.getElementById(id);
     subjects.forEach((s) => {
@@ -163,6 +169,7 @@ function showView(name) {
   if (name === 'progress') loadProgress();
   if (name === 'vacancy') loadVacancies();
   if (name === 'notes') loadNotes();
+  if (name === 'admin') loadAdminAll();
 }
 
 // ---------------------------------------------------------------------
@@ -291,17 +298,41 @@ async function loadResources() {
     grid.innerHTML = '<p class="muted">No resources found yet — check back soon or try a different filter.</p>';
     return;
   }
+  const typeIcon = { video: '🎥', pdf: '📄', notes: '📝' };
   res.resources.forEach((r) => {
     const card = document.createElement('div');
     card.className = 'resource-card glass';
+    const action = r.type === 'notes'
+      ? `<a href="#" class="read-note-link">Read note →</a>`
+      : `<a href="${escapeAttr(r.url)}" target="_blank" rel="noopener">Open resource →</a>`;
     card.innerHTML = `
-      <span class="r-type">${r.type === 'video' ? '🎥' : '📄'}</span>
+      <span class="r-type">${typeIcon[r.type] || '📄'}</span>
       <h4>${escapeHtml(r.title)}</h4>
       <p class="r-topic">${escapeHtml(r.subject)}${r.topic ? ' · ' + escapeHtml(r.topic) : ''}</p>
-      <a href="${escapeAttr(r.url)}" target="_blank" rel="noopener">Open resource →</a>
+      ${action}
     `;
+    if (r.type === 'notes') {
+      card.querySelector('.read-note-link').addEventListener('click', (e) => {
+        e.preventDefault();
+        openNoteReadModal(r);
+      });
+    }
     grid.appendChild(card);
   });
+}
+
+function bindNoteReadModal() {
+  document.getElementById('note-read-close').addEventListener('click', () =>
+    document.getElementById('note-read-modal').classList.add('hidden')
+  );
+}
+
+function openNoteReadModal(resource) {
+  document.getElementById('note-read-title').textContent = resource.title;
+  document.getElementById('note-read-meta').textContent =
+    resource.subject + (resource.topic ? ' · ' + resource.topic : '');
+  document.getElementById('note-read-content').textContent = resource.content || 'No content added yet.';
+  document.getElementById('note-read-modal').classList.remove('hidden');
 }
 
 // ---------------------------------------------------------------------
@@ -555,6 +586,303 @@ function bindProfile() {
     localStorage.removeItem('preppilot_user');
     location.reload();
   });
+}
+
+// ---------------------------------------------------------------------
+// ADMIN DASHBOARD
+// ---------------------------------------------------------------------
+function bindAdmin() {
+  document.querySelectorAll('.admin-tab').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.admin-tab').forEach((t) => t.classList.remove('active'));
+      document.querySelectorAll('.admin-panel').forEach((p) => p.classList.remove('active'));
+      tab.classList.add('active');
+      document.getElementById('admin-panel-' + tab.dataset.adminTab).classList.add('active');
+    });
+  });
+
+  // Resources / Notes form: toggle url vs content fields based on type
+  const typeSelect = document.getElementById('ar-type');
+  const urlField = document.getElementById('ar-url');
+  const contentField = document.getElementById('ar-content');
+  function syncResourceFields() {
+    const isNotes = typeSelect.value === 'notes';
+    urlField.style.display = isNotes ? 'none' : 'block';
+    contentField.style.display = isNotes ? 'block' : 'none';
+  }
+  typeSelect.addEventListener('change', syncResourceFields);
+  syncResourceFields();
+
+  document.getElementById('admin-resource-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const id = document.getElementById('ar-id').value;
+    const payload = {
+      userId: State.user.userId,
+      subject: document.getElementById('ar-subject').value,
+      topic: document.getElementById('ar-topic').value.trim(),
+      type: document.getElementById('ar-type').value,
+      title: document.getElementById('ar-title').value.trim(),
+      url: document.getElementById('ar-url').value.trim(),
+      content: document.getElementById('ar-content').value.trim()
+    };
+    const msg = document.getElementById('ar-msg');
+    if (!payload.subject || !payload.title) { msg.textContent = 'Subject and title are required.'; return; }
+
+    const res = id
+      ? await Api.post('updateResource', { ...payload, resourceId: id })
+      : await Api.post('addResource', payload);
+
+    if (res.ok) {
+      msg.style.color = 'var(--accent)'; msg.textContent = id ? 'Updated!' : 'Uploaded! Students can see it now.';
+      resetResourceForm();
+      loadAdminResources();
+      toast(id ? 'Resource updated.' : 'Resource uploaded — visible to students immediately.');
+    } else {
+      msg.style.color = 'var(--danger)'; msg.textContent = res.error || 'Something went wrong.';
+    }
+  });
+  document.getElementById('ar-cancel-btn').addEventListener('click', resetResourceForm);
+
+  // MCQ form
+  document.getElementById('admin-mcq-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const id = document.getElementById('am-id').value;
+    const payload = {
+      userId: State.user.userId,
+      subject: document.getElementById('am-subject').value,
+      topic: document.getElementById('am-topic').value.trim(),
+      question: document.getElementById('am-question').value.trim(),
+      optionA: document.getElementById('am-optionA').value.trim(),
+      optionB: document.getElementById('am-optionB').value.trim(),
+      optionC: document.getElementById('am-optionC').value.trim(),
+      optionD: document.getElementById('am-optionD').value.trim(),
+      correctOption: document.getElementById('am-correct').value,
+      difficulty: document.getElementById('am-difficulty').value,
+      explanation: document.getElementById('am-explanation').value.trim()
+    };
+    const msg = document.getElementById('am-msg');
+    if (!payload.subject || !payload.question) { msg.textContent = 'Subject and question are required.'; return; }
+
+    const res = id
+      ? await Api.post('updateMCQ', { ...payload, mcqId: id })
+      : await Api.post('addMCQ', payload);
+
+    if (res.ok) {
+      msg.style.color = 'var(--accent)'; msg.textContent = id ? 'Updated!' : 'MCQ added!';
+      resetMcqForm();
+      loadAdminMCQs();
+      toast(id ? 'MCQ updated.' : 'MCQ added to the question bank.');
+    } else {
+      msg.style.color = 'var(--danger)'; msg.textContent = res.error || 'Something went wrong.';
+    }
+  });
+  document.getElementById('am-cancel-btn').addEventListener('click', resetMcqForm);
+
+  // Vacancy form
+  document.getElementById('admin-vacancy-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const id = document.getElementById('av-id').value;
+    const payload = {
+      userId: State.user.userId,
+      title: document.getElementById('av-title').value.trim(),
+      department: document.getElementById('av-department').value.trim(),
+      notificationLink: document.getElementById('av-link').value.trim(),
+      eligibility: document.getElementById('av-eligibility').value.trim(),
+      salary: document.getElementById('av-salary').value.trim(),
+      fees: document.getElementById('av-fees').value.trim(),
+      examDate: document.getElementById('av-examdate').value.trim(),
+      lastDate: document.getElementById('av-lastdate').value.trim()
+    };
+    const msg = document.getElementById('av-msg');
+    if (!payload.title) { msg.textContent = 'Post title is required.'; return; }
+
+    const res = id
+      ? await Api.post('updateVacancy', { ...payload, vacancyId: id })
+      : await Api.post('addVacancy', payload);
+
+    if (res.ok) {
+      msg.style.color = 'var(--accent)'; msg.textContent = id ? 'Updated!' : 'Vacancy posted!';
+      resetVacancyForm();
+      loadAdminVacancies();
+      toast(id ? 'Vacancy updated.' : 'Vacancy posted — visible to students immediately.');
+    } else {
+      msg.style.color = 'var(--danger)'; msg.textContent = res.error || 'Something went wrong.';
+    }
+  });
+  document.getElementById('av-cancel-btn').addEventListener('click', resetVacancyForm);
+}
+
+function resetResourceForm() {
+  document.getElementById('admin-resource-form').reset();
+  document.getElementById('ar-id').value = '';
+  document.getElementById('ar-submit-btn').textContent = 'Upload';
+  document.getElementById('resource-form-title').textContent = 'Upload a note / PDF / video';
+  document.getElementById('ar-cancel-btn').classList.add('hidden');
+  document.getElementById('ar-msg').textContent = '';
+  document.getElementById('ar-type').dispatchEvent(new Event('change'));
+}
+function resetMcqForm() {
+  document.getElementById('admin-mcq-form').reset();
+  document.getElementById('am-id').value = '';
+  document.getElementById('am-submit-btn').textContent = 'Add MCQ';
+  document.getElementById('mcq-form-title').textContent = 'Add an MCQ';
+  document.getElementById('am-cancel-btn').classList.add('hidden');
+  document.getElementById('am-msg').textContent = '';
+}
+function resetVacancyForm() {
+  document.getElementById('admin-vacancy-form').reset();
+  document.getElementById('av-id').value = '';
+  document.getElementById('av-submit-btn').textContent = 'Add vacancy';
+  document.getElementById('vac-form-title').textContent = 'Add a vacancy';
+  document.getElementById('av-cancel-btn').classList.add('hidden');
+  document.getElementById('av-msg').textContent = '';
+}
+
+async function loadAdminAll() {
+  loadAdminStats();
+  loadAdminResources();
+  loadAdminMCQs();
+  loadAdminVacancies();
+}
+
+async function loadAdminStats() {
+  const res = await Api.get('getAdminStats', { userId: State.user.userId });
+  if (!res.ok) return;
+  document.getElementById('admin-stat-users').textContent = res.stats.totalUsers;
+  document.getElementById('admin-stat-resources').textContent = res.stats.totalResources;
+  document.getElementById('admin-stat-mcqs').textContent = res.stats.totalMCQs;
+  document.getElementById('admin-stat-vacancies').textContent = res.stats.totalVacancies;
+}
+
+async function loadAdminResources() {
+  const res = await Api.get('getResources', {});
+  const wrap = document.getElementById('admin-resource-table');
+  wrap.innerHTML = '';
+  if (!res.ok || res.resources.length === 0) { wrap.innerHTML = '<p class="muted">No resources yet.</p>'; return; }
+  const typeIcon = { video: '🎥', pdf: '📄', notes: '📝' };
+  res.resources.slice().reverse().forEach((r) => {
+    const row = document.createElement('div');
+    row.className = 'admin-row';
+    row.innerHTML = `
+      <div class="ar-info"><strong>${typeIcon[r.type] || '📄'} ${escapeHtml(r.title)}</strong>
+      <span>${escapeHtml(r.subject)}${r.topic ? ' · ' + escapeHtml(r.topic) : ''}</span></div>
+      <div class="ar-actions">
+        <button class="mini-btn" data-edit>Edit</button>
+        <button class="mini-btn danger" data-delete>Delete</button>
+      </div>`;
+    row.querySelector('[data-edit]').addEventListener('click', () => editResource(r));
+    row.querySelector('[data-delete]').addEventListener('click', () => deleteResourceRow(r.resourceId));
+    wrap.appendChild(row);
+  });
+}
+
+function editResource(r) {
+  document.getElementById('ar-id').value = r.resourceId;
+  document.getElementById('ar-subject').value = r.subject;
+  document.getElementById('ar-topic').value = r.topic || '';
+  document.getElementById('ar-type').value = r.type;
+  document.getElementById('ar-type').dispatchEvent(new Event('change'));
+  document.getElementById('ar-title').value = r.title;
+  document.getElementById('ar-url').value = r.url || '';
+  document.getElementById('ar-content').value = r.content || '';
+  document.getElementById('ar-submit-btn').textContent = 'Save changes';
+  document.getElementById('resource-form-title').textContent = 'Edit resource';
+  document.getElementById('ar-cancel-btn').classList.remove('hidden');
+  document.getElementById('admin-panel-resources').scrollIntoView({ behavior: 'smooth' });
+}
+
+async function deleteResourceRow(resourceId) {
+  if (!confirm('Delete this resource? This cannot be undone.')) return;
+  const res = await Api.post('deleteResource', { userId: State.user.userId, resourceId });
+  if (res.ok) { toast('Resource deleted.'); loadAdminResources(); loadAdminStats(); }
+}
+
+async function loadAdminMCQs() {
+  const res = await Api.get('getMCQs', { count: 500 });
+  const wrap = document.getElementById('admin-mcq-table');
+  wrap.innerHTML = '';
+  if (!res.ok || res.mcqs.length === 0) { wrap.innerHTML = '<p class="muted">No MCQs yet.</p>'; return; }
+  res.mcqs.forEach((m) => {
+    const row = document.createElement('div');
+    row.className = 'admin-row';
+    row.innerHTML = `
+      <div class="ar-info"><strong>${escapeHtml(m.question)}</strong>
+      <span>${escapeHtml(m.subject)}${m.topic ? ' · ' + escapeHtml(m.topic) : ''} · Correct: ${escapeHtml(m.correctOption)}</span></div>
+      <div class="ar-actions">
+        <button class="mini-btn" data-edit>Edit</button>
+        <button class="mini-btn danger" data-delete>Delete</button>
+      </div>`;
+    row.querySelector('[data-edit]').addEventListener('click', () => editMcq(m));
+    row.querySelector('[data-delete]').addEventListener('click', () => deleteMcqRow(m.mcqId));
+    wrap.appendChild(row);
+  });
+}
+
+function editMcq(m) {
+  document.getElementById('am-id').value = m.mcqId;
+  document.getElementById('am-subject').value = m.subject;
+  document.getElementById('am-topic').value = m.topic || '';
+  document.getElementById('am-question').value = m.question;
+  document.getElementById('am-optionA').value = m.optionA || '';
+  document.getElementById('am-optionB').value = m.optionB || '';
+  document.getElementById('am-optionC').value = m.optionC || '';
+  document.getElementById('am-optionD').value = m.optionD || '';
+  document.getElementById('am-correct').value = m.correctOption;
+  document.getElementById('am-difficulty').value = m.difficulty || 'Medium';
+  document.getElementById('am-explanation').value = m.explanation || '';
+  document.getElementById('am-submit-btn').textContent = 'Save changes';
+  document.getElementById('mcq-form-title').textContent = 'Edit MCQ';
+  document.getElementById('am-cancel-btn').classList.remove('hidden');
+  document.getElementById('admin-panel-mcqs').scrollIntoView({ behavior: 'smooth' });
+}
+
+async function deleteMcqRow(mcqId) {
+  if (!confirm('Delete this MCQ? This cannot be undone.')) return;
+  const res = await Api.post('deleteMCQ', { userId: State.user.userId, mcqId });
+  if (res.ok) { toast('MCQ deleted.'); loadAdminMCQs(); loadAdminStats(); }
+}
+
+async function loadAdminVacancies() {
+  const res = await Api.get('getVacancies', {});
+  const wrap = document.getElementById('admin-vacancy-table');
+  wrap.innerHTML = '';
+  if (!res.ok || res.vacancies.length === 0) { wrap.innerHTML = '<p class="muted">No vacancies yet.</p>'; return; }
+  res.vacancies.slice().reverse().forEach((v) => {
+    const row = document.createElement('div');
+    row.className = 'admin-row';
+    row.innerHTML = `
+      <div class="ar-info"><strong>${escapeHtml(v.title)}</strong>
+      <span>${escapeHtml(v.department || '')} · Last date: ${escapeHtml(v.lastDate || 'TBA')}</span></div>
+      <div class="ar-actions">
+        <button class="mini-btn" data-edit>Edit</button>
+        <button class="mini-btn danger" data-delete>Delete</button>
+      </div>`;
+    row.querySelector('[data-edit]').addEventListener('click', () => editVacancy(v));
+    row.querySelector('[data-delete]').addEventListener('click', () => deleteVacancyRow(v.vacancyId));
+    wrap.appendChild(row);
+  });
+}
+
+function editVacancy(v) {
+  document.getElementById('av-id').value = v.vacancyId;
+  document.getElementById('av-title').value = v.title;
+  document.getElementById('av-department').value = v.department || '';
+  document.getElementById('av-link').value = v.notificationLink || '';
+  document.getElementById('av-eligibility').value = v.eligibility || '';
+  document.getElementById('av-salary').value = v.salary || '';
+  document.getElementById('av-fees').value = v.fees || '';
+  document.getElementById('av-examdate').value = v.examDate || '';
+  document.getElementById('av-lastdate').value = v.lastDate || '';
+  document.getElementById('av-submit-btn').textContent = 'Save changes';
+  document.getElementById('vac-form-title').textContent = 'Edit vacancy';
+  document.getElementById('av-cancel-btn').classList.remove('hidden');
+  document.getElementById('admin-panel-vacancies').scrollIntoView({ behavior: 'smooth' });
+}
+
+async function deleteVacancyRow(vacancyId) {
+  if (!confirm('Delete this vacancy? This cannot be undone.')) return;
+  const res = await Api.post('deleteVacancy', { userId: State.user.userId, vacancyId });
+  if (res.ok) { toast('Vacancy deleted.'); loadAdminVacancies(); loadAdminStats(); }
 }
 
 // ---------------------------------------------------------------------
