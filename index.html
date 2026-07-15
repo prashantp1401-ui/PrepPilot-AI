@@ -66,7 +66,7 @@
   </div>
 </section>
 
-<!-- =======================  SHELL ======================= -->
+<!-- ======================= APP SHELL ======================= -->
 <div id="app" class="app hidden">
 
   <!-- Top bar -->
@@ -90,6 +90,7 @@
     <button class="nav-item" data-view="progress"><span>📈</span><small>Progress</small></button>
     <button class="nav-item" data-view="vacancy"><span>🏛️</span><small>Vacancy</small></button>
     <button class="nav-item" data-view="notes"><span>🗒️</span><small>Notes</small></button>
+    <button class="nav-item hidden" id="admin-nav-btn" data-view="admin"><span>🛠️</span><small>Admin</small></button>
   </nav>
 
   <main class="content">
@@ -186,8 +187,9 @@
         <select id="resource-subject-filter"><option value="">All subjects</option></select>
         <select id="resource-type-filter">
           <option value="">All types</option>
+          <option value="notes">📝 Notes</option>
           <option value="video">🎥 Video</option>
-          <option value="pdf">📄 PDF Notes</option>
+          <option value="pdf">📄 PDF</option>
         </select>
         <input type="search" id="resource-search" placeholder="Search resources…" />
       </div>
@@ -270,7 +272,143 @@
       <div id="notes-list" class="notes-list"></div>
     </section>
 
+    <!-- ---------- ADMIN DASHBOARD ---------- -->
+    <section class="view" id="view-admin">
+      <h2 class="view-title">Admin Dashboard</h2>
+
+      <div class="card-grid" id="admin-stats">
+        <div class="card glass stat-card"><span class="stat-icon">👥</span><div><p class="stat-value" id="admin-stat-users">—</p><p class="stat-label">Users</p></div></div>
+        <div class="card glass stat-card"><span class="stat-icon">📚</span><div><p class="stat-value" id="admin-stat-resources">—</p><p class="stat-label">Resources</p></div></div>
+        <div class="card glass stat-card"><span class="stat-icon">📝</span><div><p class="stat-value" id="admin-stat-mcqs">—</p><p class="stat-label">MCQs</p></div></div>
+        <div class="card glass stat-card"><span class="stat-icon">🏛️</span><div><p class="stat-value" id="admin-stat-vacancies">—</p><p class="stat-label">Vacancies</p></div></div>
+      </div>
+
+      <div class="admin-tabs">
+        <button class="admin-tab active" data-admin-tab="resources">📚 Notes &amp; Resources</button>
+        <button class="admin-tab" data-admin-tab="mcqs">📝 MCQs</button>
+        <button class="admin-tab" data-admin-tab="vacancies">🏛️ Vacancies</button>
+      </div>
+
+      <!-- Resources / Notes manager -->
+      <div class="admin-panel active" id="admin-panel-resources">
+        <div class="card glass">
+          <h3 id="resource-form-title">Upload a note / PDF / video</h3>
+          <form id="admin-resource-form" class="inline-form-col">
+            <input type="hidden" id="ar-id" />
+            <div class="form-row">
+              <select id="ar-subject" required><option value="">Choose subject</option></select>
+              <input type="text" id="ar-topic" placeholder="Topic (e.g. DBMS Basics)" />
+            </div>
+            <div class="form-row">
+              <select id="ar-type">
+                <option value="notes">📝 Notes (write inside app)</option>
+                <option value="pdf">📄 PDF (link)</option>
+                <option value="video">🎥 Video (link)</option>
+              </select>
+              <input type="text" id="ar-title" placeholder="Title" required />
+            </div>
+            <input type="url" id="ar-url" placeholder="Link (for PDF / Video)" />
+            <textarea id="ar-content" rows="5" placeholder="Write the note content here — students will read this directly in the app…"></textarea>
+            <div class="form-row">
+              <button type="submit" class="btn btn-primary" id="ar-submit-btn">Upload</button>
+              <button type="button" class="btn btn-ghost admin-cancel-edit hidden" id="ar-cancel-btn">Cancel edit</button>
+            </div>
+            <p class="auth-msg" id="ar-msg"></p>
+          </form>
+        </div>
+        <div class="card glass">
+          <h3>All resources</h3>
+          <div id="admin-resource-table" class="admin-table"></div>
+        </div>
+      </div>
+
+      <!-- MCQ manager -->
+      <div class="admin-panel" id="admin-panel-mcqs">
+        <div class="card glass">
+          <h3 id="mcq-form-title">Add an MCQ</h3>
+          <form id="admin-mcq-form" class="inline-form-col">
+            <input type="hidden" id="am-id" />
+            <div class="form-row">
+              <select id="am-subject" required><option value="">Choose subject</option></select>
+              <input type="text" id="am-topic" placeholder="Topic" />
+            </div>
+            <textarea id="am-question" rows="2" placeholder="Question" required></textarea>
+            <div class="form-row">
+              <input type="text" id="am-optionA" placeholder="Option A" />
+              <input type="text" id="am-optionB" placeholder="Option B" />
+            </div>
+            <div class="form-row">
+              <input type="text" id="am-optionC" placeholder="Option C" />
+              <input type="text" id="am-optionD" placeholder="Option D" />
+            </div>
+            <div class="form-row">
+              <select id="am-correct" required>
+                <option value="A">Correct: A</option><option value="B">Correct: B</option>
+                <option value="C">Correct: C</option><option value="D">Correct: D</option>
+              </select>
+              <select id="am-difficulty">
+                <option>Easy</option><option selected>Medium</option><option>Hard</option>
+              </select>
+            </div>
+            <textarea id="am-explanation" rows="2" placeholder="Explanation shown after answering"></textarea>
+            <div class="form-row">
+              <button type="submit" class="btn btn-primary" id="am-submit-btn">Add MCQ</button>
+              <button type="button" class="btn btn-ghost admin-cancel-edit hidden" id="am-cancel-btn">Cancel edit</button>
+            </div>
+            <p class="auth-msg" id="am-msg"></p>
+          </form>
+        </div>
+        <div class="card glass">
+          <h3>All MCQs</h3>
+          <div id="admin-mcq-table" class="admin-table"></div>
+        </div>
+      </div>
+
+      <!-- Vacancy manager -->
+      <div class="admin-panel" id="admin-panel-vacancies">
+        <div class="card glass">
+          <h3 id="vac-form-title">Add a vacancy</h3>
+          <form id="admin-vacancy-form" class="inline-form-col">
+            <input type="hidden" id="av-id" />
+            <input type="text" id="av-title" placeholder="Post title" required />
+            <div class="form-row">
+              <input type="text" id="av-department" placeholder="Department" />
+              <input type="url" id="av-link" placeholder="Notification link" />
+            </div>
+            <div class="form-row">
+              <input type="text" id="av-eligibility" placeholder="Eligibility" />
+              <input type="text" id="av-salary" placeholder="Salary" />
+            </div>
+            <div class="form-row">
+              <input type="text" id="av-fees" placeholder="Fees" />
+              <input type="text" id="av-examdate" placeholder="Exam date (e.g. 2026-09-14)" />
+            </div>
+            <input type="text" id="av-lastdate" placeholder="Last date to apply" />
+            <div class="form-row">
+              <button type="submit" class="btn btn-primary" id="av-submit-btn">Add vacancy</button>
+              <button type="button" class="btn btn-ghost admin-cancel-edit hidden" id="av-cancel-btn">Cancel edit</button>
+            </div>
+            <p class="auth-msg" id="av-msg"></p>
+          </form>
+        </div>
+        <div class="card glass">
+          <h3>All vacancies</h3>
+          <div id="admin-vacancy-table" class="admin-table"></div>
+        </div>
+      </div>
+    </section>
+
   </main>
+</div>
+
+<!-- Note-reading modal (used by students to read in-app 'notes' resources) -->
+<div class="modal-overlay hidden" id="note-read-modal">
+  <div class="modal glass note-read-modal">
+    <h3 id="note-read-title"></h3>
+    <p class="r-topic" id="note-read-meta"></p>
+    <div class="note-read-body" id="note-read-content"></div>
+    <button class="icon-btn modal-close" id="note-read-close">✕</button>
+  </div>
 </div>
 
 <!-- ======================= PROFILE MODAL ======================= -->
