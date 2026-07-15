@@ -6,7 +6,8 @@
 const State = {
   user: null,       // { userId, name, email, examTarget, examDate, streak, ... }
   subjects: [],
-  mcq: { questions: [], index: 0, score: 0, startTime: null, timerHandle: null, answered: false }
+  mcq: { questions: [], index: 0, score: 0, startTime: null, timerHandle: null, answered: false },
+  checklist: { items: [], byId: {}, editingId: null, pendingConfidence: 0 }
 };
 
 // ---------------------------------------------------------------------
@@ -20,11 +21,12 @@ document.addEventListener('DOMContentLoaded', () => {
   bindPlanner();
   bindResources();
   bindMcq();
-  bindVacancy();
+  bindSpeaking();
   bindNotes();
   bindProfile();
   bindAdmin();
   bindNoteReadModal();
+  bindChecklist();
 
   const saved = localStorage.getItem('preppilot_user');
   if (saved) {
@@ -165,9 +167,10 @@ function showView(name) {
   document.querySelectorAll('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.view === name));
 
   if (name === 'planner') loadPlanner();
+  if (name === 'checklist') loadChecklist();
   if (name === 'resources') loadResources();
   if (name === 'progress') loadProgress();
-  if (name === 'vacancy') loadVacancies();
+  if (name === 'speaking') loadSpeaking();
   if (name === 'notes') loadNotes();
   if (name === 'admin') loadAdminAll();
 }
@@ -213,11 +216,17 @@ async function loadDashboard() {
 
   const list = document.getElementById('dash-task-list');
   list.innerHTML = '';
-  res.todayTasks.items.forEach((t) => list.appendChild(renderTaskRow(t, loadDashboard)));
+  res.todayTasks.items.forEach((t) => list.appendChild(renderTaskRow(t, 'dash-task-progress')));
   document.getElementById('dash-task-progress').textContent = `${res.todayTasks.completed} / ${res.todayTasks.total}`;
 }
 
-function renderTaskRow(task, onDone) {
+/**
+ * Renders one checklist <li>. Ticking the box updates instantly (optimistic
+ * UI) — we don't wait for the server or reload the whole list, we just fire
+ * the save in the background and only revert if it actually fails. This is
+ * what makes taps feel instant instead of "stuck" while Apps Script responds.
+ */
+function renderTaskRow(task, progressPillId) {
   const li = document.createElement('li');
   const done = task.completed === true || task.completed === 'TRUE';
   li.innerHTML = `
@@ -226,14 +235,35 @@ function renderTaskRow(task, onDone) {
     <span class="task-tag">${escapeHtml(task.taskType || '')}</span>
   `;
   const checkbox = li.querySelector('input');
+  const titleEl = li.querySelector('.task-title');
   if (!done) {
     checkbox.addEventListener('change', async () => {
       checkbox.disabled = true;
+      titleEl.classList.add('task-done');
+      bumpProgressPill(progressPillId, +1);
+
       const res = await Api.post('completeTask', { taskId: task.taskId });
-      if (res.ok) { toast('Task completed ✅'); onDone(); }
+      if (res.ok) {
+        toast('Task completed ✅');
+      } else {
+        // revert — the save didn't actually go through
+        checkbox.disabled = false;
+        checkbox.checked = false;
+        titleEl.classList.remove('task-done');
+        bumpProgressPill(progressPillId, -1);
+        toast(res.error || 'Could not save — check your connection and try again.');
+      }
     });
   }
   return li;
+}
+
+function bumpProgressPill(id, delta) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const [done, total] = el.textContent.split('/').map((s) => parseInt(s, 10) || 0);
+  const next = Math.max(0, Math.min(total, done + delta));
+  el.textContent = `${next} / ${total}`;
 }
 
 // ---------------------------------------------------------------------
@@ -266,7 +296,7 @@ async function loadPlanner() {
   if (!res.ok) return;
   const list = document.getElementById('planner-task-list');
   list.innerHTML = '';
-  res.tasks.forEach((t) => list.appendChild(renderTaskRow(t, loadPlanner)));
+  res.tasks.forEach((t) => list.appendChild(renderTaskRow(t, 'planner-progress')));
   const doneCount = res.tasks.filter((t) => t.completed === true || t.completed === 'TRUE').length;
   document.getElementById('planner-progress').textContent = `${doneCount} / ${res.tasks.length}`;
 }
@@ -476,37 +506,198 @@ function renderChipList(elId, items, cls) {
 }
 
 // ---------------------------------------------------------------------
-// VACANCY TRACKER
+// SPEAKING PRACTICE (mic recording via MediaRecorder API)
 // ---------------------------------------------------------------------
-function bindVacancy() {
-  document.getElementById('vacancy-search').addEventListener('input', debounce(loadVacancies, 350));
+const SpeakingState = {
+  prompts: [], currentPrompt: null, mediaRecorder: null, chunks: [],
+  recordedBlob: null, timerHandle: null, seconds: 0, stream: null
+};
+
+function bindSpeaking() {
+  document.getElementById('sp-category').addEventListener('change', () => {
+    loadSpeakingPrompts(document.getElementById('sp-category').value);
+  });
+  document.getElementById('sp-next-btn').addEventListener('click', pickRandomPrompt);
+  document.getElementById('sp-record-btn').addEventListener('click', toggleRecording);
+  document.getElementById('sp-discard-btn').addEventListener('click', discardRecording);
+  document.getElementById('sp-save-btn').addEventListener('click', uploadRecording);
 }
 
-async function loadVacancies() {
-  const search = document.getElementById('vacancy-search').value.trim();
-  const res = await Api.get('getVacancies', { search });
-  const list = document.getElementById('vacancy-list');
-  list.innerHTML = '';
-  if (!res.ok || res.vacancies.length === 0) {
-    list.innerHTML = '<p class="muted">No vacancies posted yet. Check back soon!</p>';
+async function loadSpeaking() {
+  // populate category dropdown once
+  const catSelect = document.getElementById('sp-category');
+  if (catSelect.options.length <= 1) {
+    const res = await Api.get('getSpeakingPrompts', {});
+    if (res.ok) {
+      const cats = [...new Set(res.prompts.map((p) => p.category))];
+      cats.forEach((c) => {
+        const opt = document.createElement('option');
+        opt.value = c; opt.textContent = c;
+        catSelect.appendChild(opt);
+      });
+      SpeakingState.prompts = res.prompts;
+      if (!SpeakingState.currentPrompt) pickRandomPrompt();
+    }
+  }
+  loadMyRecordings();
+}
+
+async function loadSpeakingPrompts(category) {
+  const res = await Api.get('getSpeakingPrompts', category ? { category } : {});
+  if (res.ok) {
+    SpeakingState.prompts = res.prompts;
+    pickRandomPrompt();
+  }
+}
+
+function pickRandomPrompt() {
+  if (SpeakingState.prompts.length === 0) return;
+  const p = SpeakingState.prompts[Math.floor(Math.random() * SpeakingState.prompts.length)];
+  SpeakingState.currentPrompt = p;
+  document.getElementById('sp-prompt-card').innerHTML =
+    `<span class="sp-cat">${escapeHtml(p.category)} · ${escapeHtml(p.difficulty)}</span>${escapeHtml(p.prompt)}`;
+  discardRecording();
+}
+
+async function toggleRecording() {
+  const btn = document.getElementById('sp-record-btn');
+  if (SpeakingState.mediaRecorder && SpeakingState.mediaRecorder.state === 'recording') {
+    SpeakingState.mediaRecorder.stop();
     return;
   }
-  res.vacancies.forEach((v) => {
-    const card = document.createElement('div');
-    card.className = 'vacancy-card glass';
-    card.innerHTML = `
-      <h4>${escapeHtml(v.title)}</h4>
-      <div class="vacancy-meta">
-        <span>🏢 ${escapeHtml(v.department || '—')}</span>
-        <span>💰 ${escapeHtml(v.salary || '—')}</span>
-        <span>🎓 ${escapeHtml(v.eligibility || '—')}</span>
-        <span>💳 Fees: ${escapeHtml(v.fees || '—')}</span>
-        <span>📅 Exam: ${escapeHtml(v.examDate || 'TBA')}</span>
-        <span>⏰ Last date: ${escapeHtml(v.lastDate || 'TBA')}</span>
-      </div>
-      ${v.notificationLink ? `<a class="btn btn-primary" href="${escapeAttr(v.notificationLink)}" target="_blank" rel="noopener">View notification</a>` : ''}
+  if (!SpeakingState.currentPrompt) { toast('Pick a prompt first.'); return; }
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    SpeakingState.stream = stream;
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
+    const recorder = new MediaRecorder(stream, { mimeType });
+    SpeakingState.mediaRecorder = recorder;
+    SpeakingState.chunks = [];
+
+    recorder.addEventListener('dataavailable', (e) => { if (e.data.size > 0) SpeakingState.chunks.push(e.data); });
+    recorder.addEventListener('stop', onRecordingStop);
+
+    recorder.start();
+    btn.classList.add('recording');
+    btn.textContent = '⏹️';
+    document.getElementById('sp-status').textContent = 'Recording… tap again to stop';
+    startRecTimer();
+  } catch (err) {
+    toast('Could not access microphone — check browser permissions.');
+  }
+}
+
+function startRecTimer() {
+  SpeakingState.seconds = 0;
+  updateRecTimerLabel();
+  SpeakingState.timerHandle = setInterval(() => {
+    SpeakingState.seconds++;
+    updateRecTimerLabel();
+    if (SpeakingState.seconds >= 90) SpeakingState.mediaRecorder.stop(); // safety cap ~90s
+  }, 1000);
+}
+function updateRecTimerLabel() {
+  const m = String(Math.floor(SpeakingState.seconds / 60)).padStart(2, '0');
+  const s = String(SpeakingState.seconds % 60).padStart(2, '0');
+  document.getElementById('sp-rec-timer').textContent = `${m}:${s}`;
+}
+
+function onRecordingStop() {
+  clearInterval(SpeakingState.timerHandle);
+  const btn = document.getElementById('sp-record-btn');
+  btn.classList.remove('recording');
+  btn.textContent = '🎙️';
+  document.getElementById('sp-status').textContent = 'Recording ready — listen below, then save it.';
+
+  const mimeType = SpeakingState.mediaRecorder.mimeType || 'audio/webm';
+  SpeakingState.recordedBlob = new Blob(SpeakingState.chunks, { type: mimeType });
+  const url = URL.createObjectURL(SpeakingState.recordedBlob);
+  const audioEl = document.getElementById('sp-playback');
+  audioEl.src = url;
+  audioEl.classList.remove('hidden');
+  document.getElementById('sp-save-row').classList.remove('hidden');
+
+  if (SpeakingState.stream) SpeakingState.stream.getTracks().forEach((t) => t.stop());
+}
+
+function discardRecording() {
+  clearInterval(SpeakingState.timerHandle);
+  SpeakingState.recordedBlob = null;
+  SpeakingState.seconds = 0;
+  document.getElementById('sp-rec-timer').textContent = '00:00';
+  document.getElementById('sp-status').textContent = 'Tap the mic to start recording';
+  document.getElementById('sp-playback').classList.add('hidden');
+  document.getElementById('sp-save-row').classList.add('hidden');
+  document.getElementById('sp-msg').textContent = '';
+  const btn = document.getElementById('sp-record-btn');
+  btn.classList.remove('recording');
+  btn.textContent = '🎙️';
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function uploadRecording() {
+  if (!SpeakingState.recordedBlob || !SpeakingState.currentPrompt) return;
+  const msg = document.getElementById('sp-msg');
+  msg.style.color = 'var(--text-muted)';
+  msg.textContent = 'Uploading…';
+  document.getElementById('sp-save-btn').disabled = true;
+
+  try {
+    const base64 = await blobToBase64(SpeakingState.recordedBlob);
+    const res = await Api.post('saveRecording', {
+      userId: State.user.userId,
+      promptId: SpeakingState.currentPrompt.promptId,
+      audioBase64: base64,
+      mimeType: SpeakingState.recordedBlob.type,
+      durationSec: SpeakingState.seconds
+    });
+    if (res.ok) {
+      msg.style.color = 'var(--accent)'; msg.textContent = 'Saved! Listen to it anytime under "My recordings".';
+      toast('Recording saved.');
+      discardRecording();
+      loadMyRecordings();
+    } else {
+      msg.style.color = 'var(--danger)'; msg.textContent = res.error || 'Upload failed — try again.';
+    }
+  } catch (err) {
+    msg.style.color = 'var(--danger)'; msg.textContent = 'Upload failed — check your connection.';
+  }
+  document.getElementById('sp-save-btn').disabled = false;
+}
+
+async function loadMyRecordings() {
+  const res = await Api.get('getMyRecordings', { userId: State.user.userId });
+  const wrap = document.getElementById('sp-recordings-list');
+  wrap.innerHTML = '';
+  if (!res.ok || res.recordings.length === 0) {
+    wrap.innerHTML = '<p class="muted">No recordings yet — practice a prompt above to get started.</p>';
+    return;
+  }
+  res.recordings.forEach((r) => {
+    const item = document.createElement('div');
+    item.className = 'sp-rec-item';
+    const date = new Date(r.createdAt).toLocaleDateString();
+    item.innerHTML = `
+      <button class="mini-btn danger" data-delete>Delete</button>
+      <p class="sp-rec-meta">${escapeHtml(r.category)} · ${date} · ${r.durationSec}s</p>
+      <p style="margin:0 0 8px;font-size:.88rem;">${escapeHtml(r.prompt)}</p>
+      <audio controls src="${escapeAttr(r.fileUrl)}"></audio>
     `;
-    list.appendChild(card);
+    item.querySelector('[data-delete]').addEventListener('click', async () => {
+      if (!confirm('Delete this recording?')) return;
+      const delRes = await Api.post('deleteRecording', { userId: State.user.userId, recordingId: r.recordingId });
+      if (delRes.ok) { toast('Recording deleted.'); loadMyRecordings(); }
+    });
+    wrap.appendChild(item);
   });
 }
 
@@ -586,6 +777,245 @@ function bindProfile() {
     localStorage.removeItem('preppilot_user');
     location.reload();
   });
+}
+
+// ---------------------------------------------------------------------
+// MASTER CHECKLIST (KREIS RPC syllabus tracker)
+// ---------------------------------------------------------------------
+// Perf notes: we use native <details>/<summary> for the accordion (no JS
+// needed to expand/collapse — instant, browser-native) and ONE delegated
+// click/change listener on the whole container instead of one listener per
+// row (there are 200+ rows). Checkbox taps update instantly (optimistic)
+// and only the summary counters are patched afterwards — we never
+// re-fetch or re-render the whole list after a single tap.
+
+function bindChecklist() {
+  const container = document.getElementById('checklist-sections');
+
+  container.addEventListener('change', (e) => {
+    if (e.target.matches('.cl-topic-checkbox')) {
+      const itemId = e.target.dataset.itemId;
+      toggleChecklistComplete(itemId, e.target.checked, e.target);
+    }
+  });
+
+  container.addEventListener('click', (e) => {
+    const btn = e.target.closest('.cl-detail-btn');
+    if (btn) openChecklistModal(btn.dataset.itemId);
+  });
+
+  document.getElementById('checklist-search').addEventListener('input', debounce(() => {
+    renderChecklist(document.getElementById('checklist-search').value.trim().toLowerCase());
+  }, 250));
+
+  // Detail modal wiring
+  document.getElementById('cm-close-btn').addEventListener('click', () =>
+    document.getElementById('checklist-modal').classList.add('hidden')
+  );
+  document.getElementById('cm-mcq-attempted').addEventListener('input', updateAccuracyPreview);
+  document.getElementById('cm-mcq-correct').addEventListener('input', updateAccuracyPreview);
+
+  document.querySelectorAll('#cm-confidence-picker span').forEach((star) => {
+    star.addEventListener('click', () => {
+      const val = Number(star.dataset.star);
+      State.checklist.pendingConfidence = val;
+      paintStars(val);
+    });
+  });
+
+  document.getElementById('cm-save-btn').addEventListener('click', saveChecklistModal);
+}
+
+async function loadChecklist() {
+  const res = await Api.get('getChecklist', { userId: State.user.userId });
+  if (!res.ok) { toast(res.error || 'Could not load checklist.'); return; }
+  State.checklist = State.checklist || {};
+  State.checklist.items = res.items;
+  State.checklist.byId = {};
+  res.items.forEach((i) => { State.checklist.byId[i.itemId] = i; });
+  renderChecklist('');
+  updateChecklistOverall();
+}
+
+function updateChecklistOverall() {
+  const items = State.checklist.items || [];
+  const done = items.filter((i) => i.completed).length;
+  document.getElementById('checklist-overall-text').textContent = `${done} / ${items.length}`;
+  document.getElementById('checklist-overall-fill').style.width = items.length ? `${Math.round(100 * done / items.length)}%` : '0%';
+}
+
+function renderChecklist(filterText) {
+  const items = State.checklist.items || [];
+  const filtered = filterText
+    ? items.filter((i) => (i.topic + ' ' + i.subject + ' ' + i.section).toLowerCase().includes(filterText))
+    : items;
+
+  // group by section -> subject
+  const sections = new Map();
+  filtered.forEach((it) => {
+    if (!sections.has(it.section)) sections.set(it.section, new Map());
+    const subjMap = sections.get(it.section);
+    if (!subjMap.has(it.subject)) subjMap.set(it.subject, []);
+    subjMap.get(it.subject).push(it);
+  });
+
+  const frag = document.createDocumentFragment();
+  sections.forEach((subjMap, sectionName) => {
+    let sectionTotal = 0, sectionDone = 0;
+    subjMap.forEach((topicList) => topicList.forEach((t) => { sectionTotal++; if (t.completed) sectionDone++; }));
+
+    const details = document.createElement('details');
+    details.className = 'cl-section';
+    details.open = !!filterText; // auto-expand while searching
+    const summary = document.createElement('summary');
+    summary.innerHTML = `<span>${escapeHtml(sectionName)}</span><span class="cl-badge">${sectionDone} / ${sectionTotal}</span>`;
+    details.appendChild(summary);
+
+    subjMap.forEach((topicList, subjectName) => {
+      const subjDetails = document.createElement('details');
+      subjDetails.className = 'cl-subject';
+      subjDetails.open = !!filterText;
+      const subjDone = topicList.filter((t) => t.completed).length;
+      const subjSummary = document.createElement('summary');
+      // Only show the subject header if it differs meaningfully from the section (avoids redundant "Aptitude > Aptitude")
+      subjSummary.innerHTML = `<span>${escapeHtml(subjectName)}</span><span class="cl-badge">${subjDone} / ${topicList.length}</span>`;
+      subjDetails.appendChild(subjSummary);
+
+      topicList.forEach((item) => subjDetails.appendChild(renderChecklistRow(item)));
+      details.appendChild(subjDetails);
+    });
+
+    frag.appendChild(details);
+  });
+
+  const container = document.getElementById('checklist-sections');
+  container.innerHTML = '';
+  if (filtered.length === 0) {
+    container.innerHTML = '<p class="muted">No topics match your search.</p>';
+    return;
+  }
+  container.appendChild(frag);
+}
+
+function renderChecklistRow(item) {
+  const row = document.createElement('div');
+  row.className = 'cl-topic-row';
+  row.innerHTML = `
+    <input type="checkbox" class="cl-topic-checkbox" data-item-id="${item.itemId}" ${item.completed ? 'checked' : ''} />
+    <span class="cl-topic-title ${item.completed ? 'cl-done' : ''}">${escapeHtml(item.topic)}</span>
+    <span class="cl-dots">
+      <span class="${item.videoWatched ? 'on' : ''}">🎥</span><span class="${item.pdfRead ? 'on' : ''}">📄</span><span class="${item.notesCreated ? 'on' : ''}">📝</span>
+    </span>
+    <button type="button" class="cl-detail-btn" data-item-id="${item.itemId}">Details</button>
+  `;
+  return row;
+}
+
+async function toggleChecklistComplete(itemId, checked, checkboxEl) {
+  const item = State.checklist.byId[itemId];
+  if (!item) return;
+  item.completed = checked; // optimistic
+  checkboxEl.closest('.cl-topic-row').querySelector('.cl-topic-title').classList.toggle('cl-done', checked);
+  updateChecklistOverall();
+  patchSectionBadges();
+
+  const res = await Api.post('updateChecklistItem', { userId: State.user.userId, itemId, completed: checked });
+  if (!res.ok) {
+    item.completed = !checked; // revert
+    checkboxEl.checked = !checked;
+    checkboxEl.closest('.cl-topic-row').querySelector('.cl-topic-title').classList.toggle('cl-done', !checked);
+    updateChecklistOverall();
+    patchSectionBadges();
+    toast('Could not save — try again.');
+  }
+}
+
+// Cheap patch of the "done / total" badges on open <summary> elements
+// without re-rendering the whole accordion (keeps taps snappy at 200+ rows).
+function patchSectionBadges() {
+  document.querySelectorAll('#checklist-sections .cl-section').forEach((sectionEl) => {
+    let total = 0, done = 0;
+    sectionEl.querySelectorAll('.cl-topic-checkbox').forEach((cb) => { total++; if (cb.checked) done++; });
+    const badge = sectionEl.querySelector(':scope > summary .cl-badge');
+    if (badge) badge.textContent = `${done} / ${total}`;
+  });
+  document.querySelectorAll('#checklist-sections .cl-subject').forEach((subjEl) => {
+    let total = 0, done = 0;
+    subjEl.querySelectorAll('.cl-topic-checkbox').forEach((cb) => { total++; if (cb.checked) done++; });
+    const badge = subjEl.querySelector(':scope > summary .cl-badge');
+    if (badge) badge.textContent = `${done} / ${total}`;
+  });
+}
+
+function openChecklistModal(itemId) {
+  const item = State.checklist.byId[itemId];
+  if (!item) return;
+  State.checklist.editingId = itemId;
+  State.checklist.pendingConfidence = item.confidence || 0;
+
+  document.getElementById('cm-topic-title').textContent = item.topic;
+  document.getElementById('cm-topic-meta').textContent = `${item.section} · ${item.subject}`;
+  document.getElementById('cm-completed').checked = item.completed;
+  document.getElementById('cm-video').checked = item.videoWatched;
+  document.getElementById('cm-pdf').checked = item.pdfRead;
+  document.getElementById('cm-notes').checked = item.notesCreated;
+  document.getElementById('cm-mcq-attempted').value = item.mcqsAttempted || 0;
+  document.getElementById('cm-mcq-correct').value = item.mcqsCorrect || 0;
+  document.getElementById('cm-rev1').checked = item.revision1;
+  document.getElementById('cm-rev2').checked = item.revision2;
+  document.getElementById('cm-rev3').checked = item.revision3;
+  document.getElementById('cm-time').value = item.timeSpent || 0;
+  document.getElementById('cm-remarks').value = item.remarks || '';
+  paintStars(item.confidence || 0);
+  updateAccuracyPreview();
+
+  document.getElementById('checklist-modal').classList.remove('hidden');
+}
+
+function paintStars(value) {
+  document.querySelectorAll('#cm-confidence-picker span').forEach((star) => {
+    star.classList.toggle('filled', Number(star.dataset.star) <= value);
+  });
+}
+
+function updateAccuracyPreview() {
+  const attempted = Number(document.getElementById('cm-mcq-attempted').value) || 0;
+  const correct = Number(document.getElementById('cm-mcq-correct').value) || 0;
+  const el = document.getElementById('cm-accuracy');
+  el.textContent = attempted > 0 ? `Accuracy: ${Math.round(100 * correct / attempted)}%` : 'Accuracy: —';
+}
+
+async function saveChecklistModal() {
+  const itemId = State.checklist.editingId;
+  const item = State.checklist.byId[itemId];
+  if (!item || !itemId) return;
+
+  const payload = {
+    userId: State.user.userId,
+    itemId: itemId,
+    completed: document.getElementById('cm-completed').checked,
+    videoWatched: document.getElementById('cm-video').checked,
+    pdfRead: document.getElementById('cm-pdf').checked,
+    notesCreated: document.getElementById('cm-notes').checked,
+    mcqsAttempted: Number(document.getElementById('cm-mcq-attempted').value) || 0,
+    mcqsCorrect: Number(document.getElementById('cm-mcq-correct').value) || 0,
+    revision1: document.getElementById('cm-rev1').checked,
+    revision2: document.getElementById('cm-rev2').checked,
+    revision3: document.getElementById('cm-rev3').checked,
+    confidence: State.checklist.pendingConfidence || 0,
+    timeSpent: Number(document.getElementById('cm-time').value) || 0,
+    remarks: document.getElementById('cm-remarks').value.trim()
+  };
+
+  // optimistic local update
+  Object.assign(item, payload);
+  document.getElementById('checklist-modal').classList.add('hidden');
+  renderChecklist(document.getElementById('checklist-search').value.trim().toLowerCase());
+  updateChecklistOverall();
+  toast('Saved.');
+
+  const res = await Api.post('updateChecklistItem', payload);
+  if (!res.ok) toast(res.error || 'Could not save — try again.');
 }
 
 // ---------------------------------------------------------------------
@@ -678,38 +1108,33 @@ function bindAdmin() {
   });
   document.getElementById('am-cancel-btn').addEventListener('click', resetMcqForm);
 
-  // Vacancy form
-  document.getElementById('admin-vacancy-form').addEventListener('submit', async (e) => {
+  // Speaking Prompt form
+  document.getElementById('admin-prompt-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const id = document.getElementById('av-id').value;
+    const id = document.getElementById('ap-id').value;
     const payload = {
       userId: State.user.userId,
-      title: document.getElementById('av-title').value.trim(),
-      department: document.getElementById('av-department').value.trim(),
-      notificationLink: document.getElementById('av-link').value.trim(),
-      eligibility: document.getElementById('av-eligibility').value.trim(),
-      salary: document.getElementById('av-salary').value.trim(),
-      fees: document.getElementById('av-fees').value.trim(),
-      examDate: document.getElementById('av-examdate').value.trim(),
-      lastDate: document.getElementById('av-lastdate').value.trim()
+      category: document.getElementById('ap-category').value.trim(),
+      prompt: document.getElementById('ap-prompt').value.trim(),
+      difficulty: document.getElementById('ap-difficulty').value
     };
-    const msg = document.getElementById('av-msg');
-    if (!payload.title) { msg.textContent = 'Post title is required.'; return; }
+    const msg = document.getElementById('ap-msg');
+    if (!payload.category || !payload.prompt) { msg.textContent = 'Category and prompt text are required.'; return; }
 
     const res = id
-      ? await Api.post('updateVacancy', { ...payload, vacancyId: id })
-      : await Api.post('addVacancy', payload);
+      ? await Api.post('updateSpeakingPrompt', { ...payload, promptId: id })
+      : await Api.post('addSpeakingPrompt', payload);
 
     if (res.ok) {
-      msg.style.color = 'var(--accent)'; msg.textContent = id ? 'Updated!' : 'Vacancy posted!';
-      resetVacancyForm();
-      loadAdminVacancies();
-      toast(id ? 'Vacancy updated.' : 'Vacancy posted — visible to students immediately.');
+      msg.style.color = 'var(--accent)'; msg.textContent = id ? 'Updated!' : 'Prompt added!';
+      resetPromptForm();
+      loadAdminPrompts();
+      toast(id ? 'Prompt updated.' : 'Prompt added — students will see it in Speaking Practice.');
     } else {
       msg.style.color = 'var(--danger)'; msg.textContent = res.error || 'Something went wrong.';
     }
   });
-  document.getElementById('av-cancel-btn').addEventListener('click', resetVacancyForm);
+  document.getElementById('ap-cancel-btn').addEventListener('click', resetPromptForm);
 }
 
 function resetResourceForm() {
@@ -729,20 +1154,20 @@ function resetMcqForm() {
   document.getElementById('am-cancel-btn').classList.add('hidden');
   document.getElementById('am-msg').textContent = '';
 }
-function resetVacancyForm() {
-  document.getElementById('admin-vacancy-form').reset();
-  document.getElementById('av-id').value = '';
-  document.getElementById('av-submit-btn').textContent = 'Add vacancy';
-  document.getElementById('vac-form-title').textContent = 'Add a vacancy';
-  document.getElementById('av-cancel-btn').classList.add('hidden');
-  document.getElementById('av-msg').textContent = '';
+function resetPromptForm() {
+  document.getElementById('admin-prompt-form').reset();
+  document.getElementById('ap-id').value = '';
+  document.getElementById('ap-submit-btn').textContent = 'Add prompt';
+  document.getElementById('prompt-form-title').textContent = 'Add a speaking prompt';
+  document.getElementById('ap-cancel-btn').classList.add('hidden');
+  document.getElementById('ap-msg').textContent = '';
 }
 
 async function loadAdminAll() {
   loadAdminStats();
   loadAdminResources();
   loadAdminMCQs();
-  loadAdminVacancies();
+  loadAdminPrompts();
 }
 
 async function loadAdminStats() {
@@ -751,7 +1176,8 @@ async function loadAdminStats() {
   document.getElementById('admin-stat-users').textContent = res.stats.totalUsers;
   document.getElementById('admin-stat-resources').textContent = res.stats.totalResources;
   document.getElementById('admin-stat-mcqs').textContent = res.stats.totalMCQs;
-  document.getElementById('admin-stat-vacancies').textContent = res.stats.totalVacancies;
+  document.getElementById('admin-stat-prompts').textContent = res.stats.totalPrompts;
+  document.getElementById('admin-stat-recordings').textContent = res.stats.totalRecordings;
 }
 
 async function loadAdminResources() {
@@ -842,47 +1268,42 @@ async function deleteMcqRow(mcqId) {
   if (res.ok) { toast('MCQ deleted.'); loadAdminMCQs(); loadAdminStats(); }
 }
 
-async function loadAdminVacancies() {
-  const res = await Api.get('getVacancies', {});
-  const wrap = document.getElementById('admin-vacancy-table');
+async function loadAdminPrompts() {
+  const res = await Api.get('getSpeakingPrompts', {});
+  const wrap = document.getElementById('admin-prompt-table');
   wrap.innerHTML = '';
-  if (!res.ok || res.vacancies.length === 0) { wrap.innerHTML = '<p class="muted">No vacancies yet.</p>'; return; }
-  res.vacancies.slice().reverse().forEach((v) => {
+  if (!res.ok || res.prompts.length === 0) { wrap.innerHTML = '<p class="muted">No prompts yet.</p>'; return; }
+  res.prompts.forEach((p) => {
     const row = document.createElement('div');
     row.className = 'admin-row';
     row.innerHTML = `
-      <div class="ar-info"><strong>${escapeHtml(v.title)}</strong>
-      <span>${escapeHtml(v.department || '')} · Last date: ${escapeHtml(v.lastDate || 'TBA')}</span></div>
+      <div class="ar-info"><strong>${escapeHtml(p.prompt)}</strong>
+      <span>${escapeHtml(p.category)} · ${escapeHtml(p.difficulty)}</span></div>
       <div class="ar-actions">
         <button class="mini-btn" data-edit>Edit</button>
         <button class="mini-btn danger" data-delete>Delete</button>
       </div>`;
-    row.querySelector('[data-edit]').addEventListener('click', () => editVacancy(v));
-    row.querySelector('[data-delete]').addEventListener('click', () => deleteVacancyRow(v.vacancyId));
+    row.querySelector('[data-edit]').addEventListener('click', () => editPrompt(p));
+    row.querySelector('[data-delete]').addEventListener('click', () => deletePromptRow(p.promptId));
     wrap.appendChild(row);
   });
 }
 
-function editVacancy(v) {
-  document.getElementById('av-id').value = v.vacancyId;
-  document.getElementById('av-title').value = v.title;
-  document.getElementById('av-department').value = v.department || '';
-  document.getElementById('av-link').value = v.notificationLink || '';
-  document.getElementById('av-eligibility').value = v.eligibility || '';
-  document.getElementById('av-salary').value = v.salary || '';
-  document.getElementById('av-fees').value = v.fees || '';
-  document.getElementById('av-examdate').value = v.examDate || '';
-  document.getElementById('av-lastdate').value = v.lastDate || '';
-  document.getElementById('av-submit-btn').textContent = 'Save changes';
-  document.getElementById('vac-form-title').textContent = 'Edit vacancy';
-  document.getElementById('av-cancel-btn').classList.remove('hidden');
-  document.getElementById('admin-panel-vacancies').scrollIntoView({ behavior: 'smooth' });
+function editPrompt(p) {
+  document.getElementById('ap-id').value = p.promptId;
+  document.getElementById('ap-category').value = p.category;
+  document.getElementById('ap-prompt').value = p.prompt;
+  document.getElementById('ap-difficulty').value = p.difficulty || 'Medium';
+  document.getElementById('ap-submit-btn').textContent = 'Save changes';
+  document.getElementById('prompt-form-title').textContent = 'Edit prompt';
+  document.getElementById('ap-cancel-btn').classList.remove('hidden');
+  document.getElementById('admin-panel-prompts').scrollIntoView({ behavior: 'smooth' });
 }
 
-async function deleteVacancyRow(vacancyId) {
-  if (!confirm('Delete this vacancy? This cannot be undone.')) return;
-  const res = await Api.post('deleteVacancy', { userId: State.user.userId, vacancyId });
-  if (res.ok) { toast('Vacancy deleted.'); loadAdminVacancies(); loadAdminStats(); }
+async function deletePromptRow(promptId) {
+  if (!confirm('Delete this prompt? This cannot be undone.')) return;
+  const res = await Api.post('deleteSpeakingPrompt', { userId: State.user.userId, promptId });
+  if (res.ok) { toast('Prompt deleted.'); loadAdminPrompts(); loadAdminStats(); }
 }
 
 // ---------------------------------------------------------------------
