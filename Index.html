@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>PrepPilot AI — Your Exam Prep Co-Pilot</title>
+<meta name="description" content="AI-powered exam preparation platform — study planner, MCQ practice, analytics and vacancy tracker in one place." />
+<meta name="theme-color" content="#6C5CE7" />
+<link rel="manifest" href="Manifest.json" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ======================= AUTH SCREEN ======================= -->
+<section id="auth-screen" class="auth-screen">
+  <div class="auth-card glass">
+    <div class="brand">
+      <span class="brand-mark">✈</span>
+      <div>
+        <h1>PrepPilot <span>AI</span></h1>
+        <p class="tagline">Plan. Practice. Progress. Every single day.</p>
+      </div>
+    </div>
+
+    <div class="auth-tabs">
+      <button class="auth-tab active" data-auth-tab="login">Log in</button>
+      <button class="auth-tab" data-auth-tab="register">Create account</button>
+    </div>
+
+    <form id="login-form" class="auth-form">
+      <label>Email
+        <input type="email" id="login-email" required placeholder="you@example.com" />
+      </label>
+      <label>Password
+        <input type="password" id="login-password" required placeholder="••••••••" />
+      </label>
+      <button type="submit" class="btn btn-primary">Log in</button>
+      <p class="auth-msg" id="login-msg"></p>
+      <button type="button" class="btn btn-google" disabled title="Coming soon">
+        <span>G</span> Continue with Google — coming soon
+      </button>
+    </form>
+
+    <form id="register-form" class="auth-form hidden">
+      <label>Full name
+        <input type="text" id="reg-name" required placeholder="Your name" />
+      </label>
+      <label>Email
+        <input type="email" id="reg-email" required placeholder="you@example.com" />
+      </label>
+      <label>Password
+        <input type="password" id="reg-password" required placeholder="Create a password" />
+      </label>
+      <label>Target exam <span class="optional">(optional)</span>
+        <input type="text" id="reg-target" placeholder="e.g. Karnataka SDA / FDA" />
+      </label>
+      <label>Exam date <span class="optional">(optional)</span>
+        <input type="date" id="reg-date" />
+      </label>
+      <button type="submit" class="btn btn-primary">Create my account</button>
+      <p class="auth-msg" id="reg-msg"></p>
+    </form>
+  </div>
+</section>
+
+<!-- ======================= APP SHELL ======================= -->
+<div id="app" class="app hidden">
+
+  <!-- Top bar -->
+  <header class="topbar glass">
+    <div class="topbar-left">
+      <span class="brand-mark small">✈</span>
+      <span class="brand-name">PrepPilot <span>AI</span></span>
+    </div>
+    <div class="topbar-right">
+      <button class="icon-btn" id="theme-toggle" title="Toggle theme">🌙</button>
+      <button class="icon-btn" id="profile-btn" title="Profile">👤</button>
+    </div>
+  </header>
+
+  <!-- Side nav (desktop) / Bottom nav (mobile) -->
+  <nav class="nav" id="main-nav">
+    <button class="nav-item active" data-view="dashboard"><span>🏠</span><small>Home</small></button>
+    <button class="nav-item" data-view="planner"><span>🗓️</span><small>Planner</small></button>
+    <button class="nav-item" data-view="resources"><span>📚</span><small>Resources</small></button>
+    <button class="nav-item" data-view="mcq"><span>📝</span><small>MCQ</small></button>
+    <button class="nav-item" data-view="progress"><span>📈</span><small>Progress</small></button>
+    <button class="nav-item" data-view="vacancy"><span>🏛️</span><small>Vacancy</small></button>
+    <button class="nav-item" data-view="notes"><span>🗒️</span><small>Notes</small></button>
+  </nav>
+
+  <main class="content">
+
+    <!-- ---------- DASHBOARD ---------- -->
+    <section class="view active" id="view-dashboard">
+      <h2 class="view-title">Welcome back, <span id="dash-name">Aspirant</span> 👋</h2>
+
+      <div class="card-grid">
+        <div class="card glass stat-card">
+          <span class="stat-icon">🔥</span>
+          <div>
+            <p class="stat-value" id="dash-streak">0</p>
+            <p class="stat-label">Day streak</p>
+          </div>
+        </div>
+        <div class="card glass stat-card">
+          <span class="stat-icon">⏱️</span>
+          <div>
+            <p class="stat-value" id="dash-minutes">0</p>
+            <p class="stat-label">Minutes studied</p>
+          </div>
+        </div>
+        <div class="card glass stat-card">
+          <span class="stat-icon">🎯</span>
+          <div>
+            <p class="stat-value" id="dash-countdown">—</p>
+            <p class="stat-label" id="dash-exam-label">Days to exam</p>
+          </div>
+        </div>
+        <div class="card glass stat-card">
+          <span class="stat-icon">✅</span>
+          <div>
+            <p class="stat-value" id="dash-accuracy">—</p>
+            <p class="stat-label">Overall accuracy</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card glass quote-card">
+        <p class="quote-eyebrow">Today's motivation</p>
+        <p class="quote-text" id="dash-quote-text">Loading today's quote…</p>
+        <p class="quote-author" id="dash-quote-author"></p>
+        <button class="link-btn" id="quote-meaning-toggle">Show meaning ▾</button>
+        <p class="quote-meaning hidden" id="dash-quote-meaning"></p>
+      </div>
+
+      <div class="card glass">
+        <div class="card-header">
+          <h3>Today's checklist</h3>
+          <span class="pill" id="dash-task-progress">0 / 0</span>
+        </div>
+        <ul class="task-list" id="dash-task-list"></ul>
+      </div>
+
+      <div class="card glass log-time-card">
+        <h3>Log study time</h3>
+        <div class="log-time-row">
+          <input type="number" id="log-minutes" min="1" placeholder="Minutes studied just now" />
+          <button class="btn btn-primary" id="log-time-btn">Log it</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- PLANNER ---------- -->
+    <section class="view" id="view-planner">
+      <h2 class="view-title">Study Planner</h2>
+      <div class="row-between">
+        <input type="date" id="planner-date" class="date-input" />
+      </div>
+      <div class="card glass">
+        <div class="card-header">
+          <h3>Checklist</h3>
+          <span class="pill" id="planner-progress">0 / 0</span>
+        </div>
+        <ul class="task-list" id="planner-task-list"></ul>
+      </div>
+      <div class="card glass">
+        <h3>Add a custom task</h3>
+        <form id="add-task-form" class="inline-form">
+          <input type="text" id="new-task-title" placeholder="e.g. Revise SQL Joins" required />
+          <select id="new-task-subject">
+            <option value="">General</option>
+          </select>
+          <button type="submit" class="btn btn-primary">Add</button>
+        </form>
+      </div>
+    </section>
+
+    <!-- ---------- RESOURCES ---------- -->
+    <section class="view" id="view-resources">
+      <h2 class="view-title">Resources Library</h2>
+      <div class="filters">
+        <select id="resource-subject-filter"><option value="">All subjects</option></select>
+        <select id="resource-type-filter">
+          <option value="">All types</option>
+          <option value="video">🎥 Video</option>
+          <option value="pdf">📄 PDF Notes</option>
+        </select>
+        <input type="search" id="resource-search" placeholder="Search resources…" />
+      </div>
+      <div class="resource-grid" id="resource-list"></div>
+    </section>
+
+    <!-- ---------- MCQ ---------- -->
+    <section class="view" id="view-mcq">
+      <h2 class="view-title">MCQ Practice</h2>
+
+      <div class="card glass" id="mcq-setup">
+        <label>Subject
+          <select id="mcq-subject"><option value="">Choose a subject</option></select>
+        </label>
+        <label>Number of questions
+          <select id="mcq-count">
+            <option value="5">5</option>
+            <option value="10" selected>10</option>
+            <option value="20">20</option>
+          </select>
+        </label>
+        <button class="btn btn-primary" id="mcq-start-btn">Start practice</button>
+      </div>
+
+      <div class="card glass hidden" id="mcq-quiz">
+        <div class="quiz-header">
+          <span class="pill" id="mcq-progress">Q 1 / 10</span>
+          <span class="pill timer" id="mcq-timer">⏱ 00:00</span>
+        </div>
+        <p class="quiz-question" id="mcq-question"></p>
+        <div class="quiz-options" id="mcq-options"></div>
+        <p class="quiz-explanation hidden" id="mcq-explanation"></p>
+        <button class="btn btn-primary hidden" id="mcq-next-btn">Next question →</button>
+      </div>
+
+      <div class="card glass hidden" id="mcq-result">
+        <h3>Practice complete 🎉</h3>
+        <p class="result-score" id="mcq-result-score"></p>
+        <button class="btn btn-primary" id="mcq-restart-btn">Practice again</button>
+      </div>
+    </section>
+
+    <!-- ---------- PROGRESS ---------- -->
+    <section class="view" id="view-progress">
+      <h2 class="view-title">Progress & Analytics</h2>
+      <div class="card glass">
+        <h3>Subject-wise accuracy</h3>
+        <div id="progress-bars"></div>
+      </div>
+      <div class="card-grid">
+        <div class="card glass">
+          <h3>Weak topics 🔻</h3>
+          <div class="chip-list" id="weak-topics"><p class="muted">Practice a few MCQs to see this.</p></div>
+        </div>
+        <div class="card glass">
+          <h3>Strong topics 🔺</h3>
+          <div class="chip-list" id="strong-topics"><p class="muted">Practice a few MCQs to see this.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- VACANCY TRACKER ---------- -->
+    <section class="view" id="view-vacancy">
+      <h2 class="view-title">Vacancy Tracker</h2>
+      <input type="search" id="vacancy-search" placeholder="Search government jobs…" class="full-width-input" />
+      <div class="vacancy-list" id="vacancy-list"></div>
+    </section>
+
+    <!-- ---------- NOTES ---------- -->
+    <section class="view" id="view-notes">
+      <h2 class="view-title">Personal Notes</h2>
+      <div class="card glass">
+        <form id="note-form" class="inline-form-col">
+          <select id="note-subject"><option value="">General</option></select>
+          <input type="text" id="note-topic" placeholder="Topic (optional)" />
+          <textarea id="note-content" rows="4" placeholder="Write your notes here…"></textarea>
+          <button type="submit" class="btn btn-primary">Save note</button>
+        </form>
+      </div>
+      <div id="notes-list" class="notes-list"></div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ======================= PROFILE MODAL ======================= -->
+<div class="modal-overlay hidden" id="profile-modal">
+  <div class="modal glass">
+    <h3>My Profile</h3>
+    <form id="profile-form">
+      <label>Name <input type="text" id="profile-name" /></label>
+      <label>Target exam <input type="text" id="profile-target" /></label>
+      <label>Exam date <input type="date" id="profile-date" /></label>
+      <button type="submit" class="btn btn-primary">Save changes</button>
+    </form>
+    <button class="btn btn-ghost" id="logout-btn">Log out</button>
+    <button class="icon-btn modal-close" id="profile-close">✕</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="Api.js"></script>
+<script src="App.js"></script>
+</body>
+</html>
