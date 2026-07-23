@@ -7,7 +7,10 @@ const State = {
   user: null,       // { userId, name, email, examTarget, examDate, streak, ... }
   subjects: [],
   mcq: { questions: [], index: 0, score: 0, startTime: null, timerHandle: null, answered: false },
-  checklist: { items: [], byId: {}, editingId: null, pendingConfidence: 0 }
+  today: null,               // today's roadmap day, from getDashboard()
+  roadmapEditingDay: null,
+  roadmapPendingConfidence: 0,
+  roadmapPendingInterviewConfidence: 0
 };
 
 // ---------------------------------------------------------------------
@@ -18,7 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
   bindAuthForms();
   bindNav();
   bindDashboard();
-  bindPlanner();
+  bindRoadmap();
   bindResources();
   bindMcq();
   bindSpeaking();
@@ -26,7 +29,6 @@ document.addEventListener('DOMContentLoaded', () => {
   bindProfile();
   bindAdmin();
   bindNoteReadModal();
-  bindChecklist();
 
   const saved = localStorage.getItem('preppilot_user');
   if (saved) {
@@ -140,10 +142,10 @@ async function enterApp() {
 }
 
 function fillSubjectSelects(subjects) {
-  const selects = ['new-task-subject', 'resource-subject-filter', 'mcq-subject', 'note-subject',
-                    'ar-subject', 'am-subject'];
+  const selects = ['resource-subject-filter', 'mcq-subject', 'note-subject', 'ar-subject', 'am-subject'];
   selects.forEach((id) => {
     const el = document.getElementById(id);
+    if (!el) return;
     subjects.forEach((s) => {
       const opt = document.createElement('option');
       opt.value = s; opt.textContent = s;
@@ -166,8 +168,7 @@ function showView(name) {
   document.getElementById('view-' + name).classList.add('active');
   document.querySelectorAll('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.view === name));
 
-  if (name === 'planner') loadPlanner();
-  if (name === 'checklist') loadChecklist();
+  if (name === 'roadmap') loadRoadmap();
   if (name === 'resources') loadResources();
   if (name === 'progress') loadProgress();
   if (name === 'speaking') loadSpeaking();
@@ -195,6 +196,10 @@ function bindDashboard() {
       loadDashboard();
     }
   });
+
+  document.getElementById('dash-start-btn').addEventListener('click', () => {
+    if (State.today && State.today.dayNumber) openRoadmapModal(State.today.dayNumber);
+  });
 }
 
 async function loadDashboard() {
@@ -214,48 +219,63 @@ async function loadDashboard() {
     document.getElementById('dash-quote-meaning').textContent = res.quote.meaning;
   }
 
-  const list = document.getElementById('dash-task-list');
-  list.innerHTML = '';
-  res.todayTasks.items.forEach((t) => list.appendChild(renderTaskRow(t, 'dash-task-progress')));
-  document.getElementById('dash-task-progress').textContent = `${res.todayTasks.completed} / ${res.todayTasks.total}`;
+  State.today = res.today;
+  document.getElementById('dash-day-header').textContent =
+    `Day ${res.today.dayNumber} of ${res.today.totalDays} · ${res.today.phase}`;
+  document.getElementById('dash-today-topic').textContent = res.today.topic || '—';
+  document.getElementById('dash-today-phase').textContent = `Phase: ${res.today.phase} · Week ${res.today.weekNumber}`;
+  document.getElementById('dash-today-objective').textContent = res.today.day ? res.today.day.learningObjectives : '';
+  document.getElementById('dash-today-time').textContent = res.today.estimatedMinutes ? `Estimated time: ${res.today.estimatedMinutes} minutes` : '';
+
+  const stats = res.progressStats;
+  setProgressBar('dash-progress-overall', stats.overallPct);
+  setProgressBar('dash-progress-technical', stats.technicalPct);
+  setProgressBar('dash-progress-english', stats.englishPct);
+
+  renderDailyChecklist(res.today.checklist, res.today.dayNumber);
+}
+
+function setProgressBar(prefix, pct) {
+  document.getElementById(prefix + '-text').textContent = pct + '%';
+  document.getElementById(prefix + '-fill').style.width = pct + '%';
 }
 
 /**
- * Renders one checklist <li>. Ticking the box updates instantly (optimistic
- * UI) — we don't wait for the server or reload the whole list, we just fire
- * the save in the background and only revert if it actually fails. This is
- * what makes taps feel instant instead of "stuck" while Apps Script responds.
+ * Renders the 10-item daily checklist (Technical Learning, Hands-on
+ * Practice, Assignment, Listening, Speaking, Reading, Writing, Vocabulary,
+ * Interview Question, Revision). Ticking a box here is a QUICK toggle —
+ * optimistic UI, background save — separate from the full detail form in
+ * the Roadmap day modal (which sets the same underlying fields).
  */
-function renderTaskRow(task, progressPillId) {
-  const li = document.createElement('li');
-  const done = task.completed === true || task.completed === 'TRUE';
-  li.innerHTML = `
-    <input type="checkbox" ${done ? 'checked disabled' : ''} />
-    <span class="task-title ${done ? 'task-done' : ''}">${escapeHtml(task.title)}</span>
-    <span class="task-tag">${escapeHtml(task.taskType || '')}</span>
-  `;
-  const checkbox = li.querySelector('input');
-  const titleEl = li.querySelector('.task-title');
-  if (!done) {
+function renderDailyChecklist(checklist, dayNumber) {
+  const list = document.getElementById('dash-task-list');
+  list.innerHTML = '';
+  checklist.items.forEach((item) => {
+    const li = document.createElement('li');
+    li.innerHTML = `
+      <input type="checkbox" ${item.done ? 'checked' : ''} />
+      <span class="task-title ${item.done ? 'task-done' : ''}">${escapeHtml(item.label)}</span>
+    `;
+    const checkbox = li.querySelector('input');
+    const titleEl = li.querySelector('.task-title');
     checkbox.addEventListener('change', async () => {
-      checkbox.disabled = true;
-      titleEl.classList.add('task-done');
-      bumpProgressPill(progressPillId, +1);
+      const newVal = checkbox.checked;
+      titleEl.classList.toggle('task-done', newVal);
+      bumpProgressPill('dash-task-progress', newVal ? +1 : -1);
 
-      const res = await Api.post('completeTask', { taskId: task.taskId });
-      if (res.ok) {
-        toast('Task completed ✅');
-      } else {
-        // revert — the save didn't actually go through
-        checkbox.disabled = false;
-        checkbox.checked = false;
-        titleEl.classList.remove('task-done');
-        bumpProgressPill(progressPillId, -1);
-        toast(res.error || 'Could not save — check your connection and try again.');
+      const payload = { userId: State.user.userId, dayNumber };
+      payload[item.key] = newVal;
+      const res = await Api.post('updateRoadmapProgress', payload);
+      if (!res.ok) {
+        checkbox.checked = !newVal;
+        titleEl.classList.toggle('task-done', !newVal);
+        bumpProgressPill('dash-task-progress', newVal ? -1 : +1);
+        toast('Could not save — try again.');
       }
     });
-  }
-  return li;
+    list.appendChild(li);
+  });
+  document.getElementById('dash-task-progress').textContent = `${checklist.completed} / ${checklist.total}`;
 }
 
 function bumpProgressPill(id, delta) {
@@ -267,42 +287,199 @@ function bumpProgressPill(id, delta) {
 }
 
 // ---------------------------------------------------------------------
-// PLANNER
+// 180-DAY ROADMAP (merges what used to be the Planner + Master Checklist)
 // ---------------------------------------------------------------------
-function bindPlanner() {
-  const dateInput = document.getElementById('planner-date');
-  dateInput.valueAsDate = new Date();
-  dateInput.addEventListener('change', loadPlanner);
+function bindRoadmap() {
+  document.getElementById('roadmap-phase-filter').addEventListener('change', loadRoadmapList);
+  document.getElementById('roadmap-search').addEventListener('input', debounce(loadRoadmapList, 300));
 
-  document.getElementById('add-task-form').addEventListener('submit', async (e) => {
+  document.getElementById('rm-close-btn').addEventListener('click', () =>
+    document.getElementById('roadmap-modal').classList.add('hidden')
+  );
+  document.getElementById('rm-save-btn').addEventListener('click', saveRoadmapModal);
+  document.getElementById('rm-go-speaking-tab').addEventListener('click', (e) => {
     e.preventDefault();
-    const title = document.getElementById('new-task-title').value.trim();
-    const subject = document.getElementById('new-task-subject').value;
-    if (!title) return;
-    const res = await Api.post('addTask', {
-      userId: State.user.userId, title, subject, date: dateInput.value, taskType: 'Custom'
+    document.getElementById('roadmap-modal').classList.add('hidden');
+    showView('speaking');
+  });
+
+  bindStarPicker('rm-confidence-picker', (v) => { State.roadmapPendingConfidence = v; });
+  bindStarPicker('rm-interview-confidence-picker', (v) => { State.roadmapPendingInterviewConfidence = v; });
+}
+
+function bindStarPicker(elId, onPick) {
+  document.querySelectorAll(`#${elId} span`).forEach((star) => {
+    star.addEventListener('click', () => {
+      const val = Number(star.dataset.star);
+      onPick(val);
+      document.querySelectorAll(`#${elId} span`).forEach((s) => s.classList.toggle('filled', Number(s.dataset.star) <= val));
     });
-    if (res.ok) {
-      document.getElementById('new-task-title').value = '';
-      toast('Task added.');
-      loadPlanner();
-    }
   });
 }
 
-async function loadPlanner() {
-  const date = document.getElementById('planner-date').value || todayIso();
-  const res = await Api.get('getStudyPlan', { userId: State.user.userId, date });
-  if (!res.ok) return;
-  const list = document.getElementById('planner-task-list');
-  list.innerHTML = '';
-  res.tasks.forEach((t) => list.appendChild(renderTaskRow(t, 'planner-progress')));
-  const doneCount = res.tasks.filter((t) => t.completed === true || t.completed === 'TRUE').length;
-  document.getElementById('planner-progress').textContent = `${doneCount} / ${res.tasks.length}`;
+async function loadRoadmap() {
+  // populate phase filter once
+  const select = document.getElementById('roadmap-phase-filter');
+  if (select.options.length <= 1) {
+    const res = await Api.get('getRoadmapList', { userId: State.user.userId });
+    if (res.ok) {
+      const phases = [...new Set(res.days.map((d) => d.phase))];
+      phases.forEach((ph) => {
+        const opt = document.createElement('option');
+        opt.value = ph; opt.textContent = ph;
+        select.appendChild(opt);
+      });
+      renderRoadmapList(res.days, res.totalDays);
+    }
+  } else {
+    loadRoadmapList();
+  }
 }
 
-function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+async function loadRoadmapList() {
+  const params = {
+    userId: State.user.userId,
+    phase: document.getElementById('roadmap-phase-filter').value,
+    search: document.getElementById('roadmap-search').value.trim()
+  };
+  const res = await Api.get('getRoadmapList', params);
+  if (res.ok) renderRoadmapList(res.days, res.totalDays);
+}
+
+function renderRoadmapList(days, totalDays) {
+  const wrap = document.getElementById('roadmap-days-list');
+  wrap.innerHTML = '';
+  const doneCount = days.filter((d) => d.dayCompleted).length;
+  document.getElementById('roadmap-overall-text').textContent = `${doneCount} / ${totalDays}`;
+  document.getElementById('roadmap-overall-fill').style.width = totalDays ? `${Math.round(100 * doneCount / totalDays)}%` : '0%';
+
+  if (days.length === 0) {
+    wrap.innerHTML = '<p class="muted">No days match your search.</p>';
+    return;
+  }
+
+  // group by phase for a lightweight native accordion (fast even for 180 rows)
+  const byPhase = new Map();
+  days.forEach((d) => {
+    if (!byPhase.has(d.phase)) byPhase.set(d.phase, []);
+    byPhase.get(d.phase).push(d);
+  });
+
+  const frag = document.createDocumentFragment();
+  byPhase.forEach((phaseDays, phaseName) => {
+    const phaseDone = phaseDays.filter((d) => d.dayCompleted).length;
+    const details = document.createElement('details');
+    details.className = 'cl-section';
+    details.open = document.getElementById('roadmap-search').value.trim().length > 0;
+    details.innerHTML = `<summary><span>${escapeHtml(phaseName)}</span><span class="cl-badge">${phaseDone} / ${phaseDays.length}</span></summary>`;
+    phaseDays.forEach((d) => {
+      const row = document.createElement('div');
+      row.className = 'cl-topic-row';
+      row.innerHTML = `
+        <span class="rm-day-num">Day ${d.dayNumber}</span>
+        <span class="cl-topic-title ${d.dayCompleted ? 'cl-done' : ''}">${escapeHtml(d.topic)}</span>
+        <button type="button" class="cl-detail-btn" data-day="${d.dayNumber}">Open</button>
+      `;
+      row.querySelector('.cl-detail-btn').addEventListener('click', () => openRoadmapModal(d.dayNumber));
+      details.appendChild(row);
+    });
+    frag.appendChild(details);
+  });
+  wrap.appendChild(frag);
+}
+
+async function openRoadmapModal(dayNumber) {
+  const res = await Api.get('getRoadmapDay', { userId: State.user.userId, dayNumber });
+  if (!res.ok) { toast(res.error || 'Could not load this day.'); return; }
+  const d = res.day, pr = res.progress;
+  State.roadmapEditingDay = dayNumber;
+  State.roadmapPendingConfidence = Number(pr.confidence) || 0;
+  State.roadmapPendingInterviewConfidence = Number(pr.interviewConfidence) || 0;
+
+  document.getElementById('rm-meta').textContent = `Day ${d.dayNumber} · ${d.phase} · Week ${d.weekNumber}`;
+  document.getElementById('rm-topic').textContent = d.topic;
+  document.getElementById('rm-objectives').textContent = d.learningObjectives;
+  document.getElementById('rm-study').textContent = d.studyTask;
+  document.getElementById('rm-handson').textContent = d.handsOnTask;
+  document.getElementById('rm-business').textContent = d.businessCase;
+  document.getElementById('rm-output').textContent = d.expectedOutput;
+  document.getElementById('rm-assignment-title').textContent = d.assignmentTitle;
+  document.getElementById('rm-assignment-desc').textContent = d.assignmentDescription;
+  document.getElementById('rm-listening').textContent = d.listeningTask;
+  document.getElementById('rm-speaking').textContent = d.speakingTask;
+  document.getElementById('rm-reading').textContent = d.readingContent;
+  document.getElementById('rm-writing').textContent = d.writingTask;
+  document.getElementById('rm-vocabulary').textContent = d.vocabulary;
+  document.getElementById('rm-interview-question').textContent = d.interviewQuestion;
+
+  document.getElementById('rm-technical').checked = truthy(pr.technicalStatus);
+  document.getElementById('rm-practice').checked = truthy(pr.practiceStatus);
+  document.getElementById('rm-assignment-answer').value = pr.assignmentAnswer || '';
+  document.getElementById('rm-assignment-status').checked = truthy(pr.assignmentStatus);
+  document.getElementById('rm-listening-status').checked = truthy(pr.listeningStatus);
+  document.getElementById('rm-speaking-status').checked = truthy(pr.speakingStatus);
+  document.getElementById('rm-reading-status').checked = truthy(pr.readingStatus);
+  document.getElementById('rm-writing-answer').value = pr.writingAnswer || '';
+  document.getElementById('rm-writing-status').checked = truthy(pr.writingStatus);
+  document.getElementById('rm-vocabulary-status').checked = truthy(pr.vocabularyLearned);
+  document.getElementById('rm-interview-status').checked = truthy(pr.interviewStatus);
+  document.getElementById('rm-revision-status').checked = truthy(pr.revisionStatus);
+  document.getElementById('rm-what-learned').value = pr.whatILearned || '';
+  document.getElementById('rm-difficulties').value = pr.difficulties || '';
+  document.getElementById('rm-revision-needed').value = pr.revisionNeeded || '';
+  document.getElementById('rm-remarks').value = pr.remarks || '';
+
+  paintStarPicker('rm-confidence-picker', State.roadmapPendingConfidence);
+  paintStarPicker('rm-interview-confidence-picker', State.roadmapPendingInterviewConfidence);
+
+  document.getElementById('roadmap-modal').classList.remove('hidden');
+}
+
+function paintStarPicker(elId, value) {
+  document.querySelectorAll(`#${elId} span`).forEach((star) => {
+    star.classList.toggle('filled', Number(star.dataset.star) <= value);
+  });
+}
+
+function truthy(v) { return v === true || v === 'TRUE'; }
+
+async function saveRoadmapModal() {
+  const dayNumber = State.roadmapEditingDay;
+  if (!dayNumber) return;
+
+  const payload = {
+    userId: State.user.userId, dayNumber,
+    technicalStatus: document.getElementById('rm-technical').checked,
+    practiceStatus: document.getElementById('rm-practice').checked,
+    assignmentAnswer: document.getElementById('rm-assignment-answer').value.trim(),
+    assignmentStatus: document.getElementById('rm-assignment-status').checked,
+    listeningStatus: document.getElementById('rm-listening-status').checked,
+    speakingStatus: document.getElementById('rm-speaking-status').checked,
+    readingStatus: document.getElementById('rm-reading-status').checked,
+    writingAnswer: document.getElementById('rm-writing-answer').value.trim(),
+    writingStatus: document.getElementById('rm-writing-status').checked,
+    vocabularyLearned: document.getElementById('rm-vocabulary-status').checked,
+    interviewStatus: document.getElementById('rm-interview-status').checked,
+    interviewConfidence: State.roadmapPendingInterviewConfidence || 0,
+    revisionStatus: document.getElementById('rm-revision-status').checked,
+    whatILearned: document.getElementById('rm-what-learned').value.trim(),
+    difficulties: document.getElementById('rm-difficulties').value.trim(),
+    revisionNeeded: document.getElementById('rm-revision-needed').value.trim(),
+    confidence: State.roadmapPendingConfidence || 0,
+    remarks: document.getElementById('rm-remarks').value.trim()
+  };
+
+  document.getElementById('roadmap-modal').classList.add('hidden');
+  toast('Saving your progress…');
+
+  const res = await Api.post('updateRoadmapProgress', payload);
+  if (res.ok) {
+    toast(res.dayCompleted ? 'Day complete! 🎉 Great work.' : 'Progress saved.');
+    loadRoadmapList();
+    if (State.today && State.today.dayNumber === dayNumber) loadDashboard();
+  } else {
+    toast(res.error || 'Could not save — try again.');
+  }
 }
 
 // ---------------------------------------------------------------------
@@ -777,245 +954,6 @@ function bindProfile() {
     localStorage.removeItem('preppilot_user');
     location.reload();
   });
-}
-
-// ---------------------------------------------------------------------
-// MASTER CHECKLIST (KREIS RPC syllabus tracker)
-// ---------------------------------------------------------------------
-// Perf notes: we use native <details>/<summary> for the accordion (no JS
-// needed to expand/collapse — instant, browser-native) and ONE delegated
-// click/change listener on the whole container instead of one listener per
-// row (there are 200+ rows). Checkbox taps update instantly (optimistic)
-// and only the summary counters are patched afterwards — we never
-// re-fetch or re-render the whole list after a single tap.
-
-function bindChecklist() {
-  const container = document.getElementById('checklist-sections');
-
-  container.addEventListener('change', (e) => {
-    if (e.target.matches('.cl-topic-checkbox')) {
-      const itemId = e.target.dataset.itemId;
-      toggleChecklistComplete(itemId, e.target.checked, e.target);
-    }
-  });
-
-  container.addEventListener('click', (e) => {
-    const btn = e.target.closest('.cl-detail-btn');
-    if (btn) openChecklistModal(btn.dataset.itemId);
-  });
-
-  document.getElementById('checklist-search').addEventListener('input', debounce(() => {
-    renderChecklist(document.getElementById('checklist-search').value.trim().toLowerCase());
-  }, 250));
-
-  // Detail modal wiring
-  document.getElementById('cm-close-btn').addEventListener('click', () =>
-    document.getElementById('checklist-modal').classList.add('hidden')
-  );
-  document.getElementById('cm-mcq-attempted').addEventListener('input', updateAccuracyPreview);
-  document.getElementById('cm-mcq-correct').addEventListener('input', updateAccuracyPreview);
-
-  document.querySelectorAll('#cm-confidence-picker span').forEach((star) => {
-    star.addEventListener('click', () => {
-      const val = Number(star.dataset.star);
-      State.checklist.pendingConfidence = val;
-      paintStars(val);
-    });
-  });
-
-  document.getElementById('cm-save-btn').addEventListener('click', saveChecklistModal);
-}
-
-async function loadChecklist() {
-  const res = await Api.get('getChecklist', { userId: State.user.userId });
-  if (!res.ok) { toast(res.error || 'Could not load checklist.'); return; }
-  State.checklist = State.checklist || {};
-  State.checklist.items = res.items;
-  State.checklist.byId = {};
-  res.items.forEach((i) => { State.checklist.byId[i.itemId] = i; });
-  renderChecklist('');
-  updateChecklistOverall();
-}
-
-function updateChecklistOverall() {
-  const items = State.checklist.items || [];
-  const done = items.filter((i) => i.completed).length;
-  document.getElementById('checklist-overall-text').textContent = `${done} / ${items.length}`;
-  document.getElementById('checklist-overall-fill').style.width = items.length ? `${Math.round(100 * done / items.length)}%` : '0%';
-}
-
-function renderChecklist(filterText) {
-  const items = State.checklist.items || [];
-  const filtered = filterText
-    ? items.filter((i) => (i.topic + ' ' + i.subject + ' ' + i.section).toLowerCase().includes(filterText))
-    : items;
-
-  // group by section -> subject
-  const sections = new Map();
-  filtered.forEach((it) => {
-    if (!sections.has(it.section)) sections.set(it.section, new Map());
-    const subjMap = sections.get(it.section);
-    if (!subjMap.has(it.subject)) subjMap.set(it.subject, []);
-    subjMap.get(it.subject).push(it);
-  });
-
-  const frag = document.createDocumentFragment();
-  sections.forEach((subjMap, sectionName) => {
-    let sectionTotal = 0, sectionDone = 0;
-    subjMap.forEach((topicList) => topicList.forEach((t) => { sectionTotal++; if (t.completed) sectionDone++; }));
-
-    const details = document.createElement('details');
-    details.className = 'cl-section';
-    details.open = !!filterText; // auto-expand while searching
-    const summary = document.createElement('summary');
-    summary.innerHTML = `<span>${escapeHtml(sectionName)}</span><span class="cl-badge">${sectionDone} / ${sectionTotal}</span>`;
-    details.appendChild(summary);
-
-    subjMap.forEach((topicList, subjectName) => {
-      const subjDetails = document.createElement('details');
-      subjDetails.className = 'cl-subject';
-      subjDetails.open = !!filterText;
-      const subjDone = topicList.filter((t) => t.completed).length;
-      const subjSummary = document.createElement('summary');
-      // Only show the subject header if it differs meaningfully from the section (avoids redundant "Aptitude > Aptitude")
-      subjSummary.innerHTML = `<span>${escapeHtml(subjectName)}</span><span class="cl-badge">${subjDone} / ${topicList.length}</span>`;
-      subjDetails.appendChild(subjSummary);
-
-      topicList.forEach((item) => subjDetails.appendChild(renderChecklistRow(item)));
-      details.appendChild(subjDetails);
-    });
-
-    frag.appendChild(details);
-  });
-
-  const container = document.getElementById('checklist-sections');
-  container.innerHTML = '';
-  if (filtered.length === 0) {
-    container.innerHTML = '<p class="muted">No topics match your search.</p>';
-    return;
-  }
-  container.appendChild(frag);
-}
-
-function renderChecklistRow(item) {
-  const row = document.createElement('div');
-  row.className = 'cl-topic-row';
-  row.innerHTML = `
-    <input type="checkbox" class="cl-topic-checkbox" data-item-id="${item.itemId}" ${item.completed ? 'checked' : ''} />
-    <span class="cl-topic-title ${item.completed ? 'cl-done' : ''}">${escapeHtml(item.topic)}</span>
-    <span class="cl-dots">
-      <span class="${item.videoWatched ? 'on' : ''}">🎥</span><span class="${item.pdfRead ? 'on' : ''}">📄</span><span class="${item.notesCreated ? 'on' : ''}">📝</span>
-    </span>
-    <button type="button" class="cl-detail-btn" data-item-id="${item.itemId}">Details</button>
-  `;
-  return row;
-}
-
-async function toggleChecklistComplete(itemId, checked, checkboxEl) {
-  const item = State.checklist.byId[itemId];
-  if (!item) return;
-  item.completed = checked; // optimistic
-  checkboxEl.closest('.cl-topic-row').querySelector('.cl-topic-title').classList.toggle('cl-done', checked);
-  updateChecklistOverall();
-  patchSectionBadges();
-
-  const res = await Api.post('updateChecklistItem', { userId: State.user.userId, itemId, completed: checked });
-  if (!res.ok) {
-    item.completed = !checked; // revert
-    checkboxEl.checked = !checked;
-    checkboxEl.closest('.cl-topic-row').querySelector('.cl-topic-title').classList.toggle('cl-done', !checked);
-    updateChecklistOverall();
-    patchSectionBadges();
-    toast('Could not save — try again.');
-  }
-}
-
-// Cheap patch of the "done / total" badges on open <summary> elements
-// without re-rendering the whole accordion (keeps taps snappy at 200+ rows).
-function patchSectionBadges() {
-  document.querySelectorAll('#checklist-sections .cl-section').forEach((sectionEl) => {
-    let total = 0, done = 0;
-    sectionEl.querySelectorAll('.cl-topic-checkbox').forEach((cb) => { total++; if (cb.checked) done++; });
-    const badge = sectionEl.querySelector(':scope > summary .cl-badge');
-    if (badge) badge.textContent = `${done} / ${total}`;
-  });
-  document.querySelectorAll('#checklist-sections .cl-subject').forEach((subjEl) => {
-    let total = 0, done = 0;
-    subjEl.querySelectorAll('.cl-topic-checkbox').forEach((cb) => { total++; if (cb.checked) done++; });
-    const badge = subjEl.querySelector(':scope > summary .cl-badge');
-    if (badge) badge.textContent = `${done} / ${total}`;
-  });
-}
-
-function openChecklistModal(itemId) {
-  const item = State.checklist.byId[itemId];
-  if (!item) return;
-  State.checklist.editingId = itemId;
-  State.checklist.pendingConfidence = item.confidence || 0;
-
-  document.getElementById('cm-topic-title').textContent = item.topic;
-  document.getElementById('cm-topic-meta').textContent = `${item.section} · ${item.subject}`;
-  document.getElementById('cm-completed').checked = item.completed;
-  document.getElementById('cm-video').checked = item.videoWatched;
-  document.getElementById('cm-pdf').checked = item.pdfRead;
-  document.getElementById('cm-notes').checked = item.notesCreated;
-  document.getElementById('cm-mcq-attempted').value = item.mcqsAttempted || 0;
-  document.getElementById('cm-mcq-correct').value = item.mcqsCorrect || 0;
-  document.getElementById('cm-rev1').checked = item.revision1;
-  document.getElementById('cm-rev2').checked = item.revision2;
-  document.getElementById('cm-rev3').checked = item.revision3;
-  document.getElementById('cm-time').value = item.timeSpent || 0;
-  document.getElementById('cm-remarks').value = item.remarks || '';
-  paintStars(item.confidence || 0);
-  updateAccuracyPreview();
-
-  document.getElementById('checklist-modal').classList.remove('hidden');
-}
-
-function paintStars(value) {
-  document.querySelectorAll('#cm-confidence-picker span').forEach((star) => {
-    star.classList.toggle('filled', Number(star.dataset.star) <= value);
-  });
-}
-
-function updateAccuracyPreview() {
-  const attempted = Number(document.getElementById('cm-mcq-attempted').value) || 0;
-  const correct = Number(document.getElementById('cm-mcq-correct').value) || 0;
-  const el = document.getElementById('cm-accuracy');
-  el.textContent = attempted > 0 ? `Accuracy: ${Math.round(100 * correct / attempted)}%` : 'Accuracy: —';
-}
-
-async function saveChecklistModal() {
-  const itemId = State.checklist.editingId;
-  const item = State.checklist.byId[itemId];
-  if (!item || !itemId) return;
-
-  const payload = {
-    userId: State.user.userId,
-    itemId: itemId,
-    completed: document.getElementById('cm-completed').checked,
-    videoWatched: document.getElementById('cm-video').checked,
-    pdfRead: document.getElementById('cm-pdf').checked,
-    notesCreated: document.getElementById('cm-notes').checked,
-    mcqsAttempted: Number(document.getElementById('cm-mcq-attempted').value) || 0,
-    mcqsCorrect: Number(document.getElementById('cm-mcq-correct').value) || 0,
-    revision1: document.getElementById('cm-rev1').checked,
-    revision2: document.getElementById('cm-rev2').checked,
-    revision3: document.getElementById('cm-rev3').checked,
-    confidence: State.checklist.pendingConfidence || 0,
-    timeSpent: Number(document.getElementById('cm-time').value) || 0,
-    remarks: document.getElementById('cm-remarks').value.trim()
-  };
-
-  // optimistic local update
-  Object.assign(item, payload);
-  document.getElementById('checklist-modal').classList.add('hidden');
-  renderChecklist(document.getElementById('checklist-search').value.trim().toLowerCase());
-  updateChecklistOverall();
-  toast('Saved.');
-
-  const res = await Api.post('updateChecklistItem', payload);
-  if (!res.ok) toast(res.error || 'Could not save — try again.');
 }
 
 // ---------------------------------------------------------------------
