@@ -10,7 +10,7 @@
 <link rel="apple-touch-icon" href="icons/icon-192.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="style.css" />
+<link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
 
@@ -84,8 +84,7 @@
   <!-- Side nav (desktop) / Bottom nav (mobile) -->
   <nav class="nav" id="main-nav">
     <button class="nav-item active" data-view="dashboard"><span>🏠</span><small>Home</small></button>
-    <button class="nav-item" data-view="planner"><span>🗓️</span><small>Planner</small></button>
-    <button class="nav-item" data-view="checklist"><span>📋</span><small>Checklist</small></button>
+    <button class="nav-item" data-view="roadmap"><span>🗺️</span><small>Roadmap</small></button>
     <button class="nav-item" data-view="resources"><span>📚</span><small>Resources</small></button>
     <button class="nav-item" data-view="mcq"><span>📝</span><small>MCQ</small></button>
     <button class="nav-item" data-view="progress"><span>📈</span><small>Progress</small></button>
@@ -99,6 +98,7 @@
     <!-- ---------- DASHBOARD ---------- -->
     <section class="view active" id="view-dashboard">
       <h2 class="view-title">Welcome back, <span id="dash-name">Aspirant</span> 👋</h2>
+      <p class="dash-day-header" id="dash-day-header">Day 1 of 180</p>
 
       <div class="card-grid">
         <div class="card glass stat-card">
@@ -126,8 +126,24 @@
           <span class="stat-icon">✅</span>
           <div>
             <p class="stat-value" id="dash-accuracy">—</p>
-            <p class="stat-label">Overall accuracy</p>
+            <p class="stat-label">MCQ accuracy</p>
           </div>
+        </div>
+      </div>
+
+      <div class="card glass">
+        <h3>Progress</h3>
+        <div class="progress-row">
+          <div class="p-label"><span>Overall (180-day roadmap)</span><span id="dash-progress-overall-text">0%</span></div>
+          <div class="progress-bar-bg"><div class="progress-bar-fill" id="dash-progress-overall-fill" style="width:0%"></div></div>
+        </div>
+        <div class="progress-row">
+          <div class="p-label"><span>Technical Skills</span><span id="dash-progress-technical-text">0%</span></div>
+          <div class="progress-bar-bg"><div class="progress-bar-fill" id="dash-progress-technical-fill" style="width:0%"></div></div>
+        </div>
+        <div class="progress-row">
+          <div class="p-label"><span>Spoken English</span><span id="dash-progress-english-text">0%</span></div>
+          <div class="progress-bar-bg"><div class="progress-bar-fill" id="dash-progress-english-fill" style="width:0%"></div></div>
         </div>
       </div>
 
@@ -139,10 +155,19 @@
         <p class="quote-meaning hidden" id="dash-quote-meaning"></p>
       </div>
 
+      <div class="card glass today-priority-card">
+        <p class="quote-eyebrow">Today's priority</p>
+        <h3 id="dash-today-topic">Loading…</h3>
+        <p class="muted" id="dash-today-phase"></p>
+        <p id="dash-today-objective"></p>
+        <p class="muted" id="dash-today-time"></p>
+        <button class="btn btn-primary" id="dash-start-btn">Start Learning →</button>
+      </div>
+
       <div class="card glass">
         <div class="card-header">
           <h3>Today's checklist</h3>
-          <span class="pill" id="dash-task-progress">0 / 0</span>
+          <span class="pill" id="dash-task-progress">0 / 10</span>
         </div>
         <ul class="task-list" id="dash-task-list"></ul>
       </div>
@@ -156,44 +181,22 @@
       </div>
     </section>
 
-    <!-- ---------- PLANNER ---------- -->
-    <section class="view" id="view-planner">
-      <h2 class="view-title">Study Planner</h2>
-      <div class="row-between">
-        <input type="date" id="planner-date" class="date-input" />
-      </div>
-      <div class="card glass">
-        <div class="card-header">
-          <h3>Checklist</h3>
-          <span class="pill" id="planner-progress">0 / 0</span>
-        </div>
-        <ul class="task-list" id="planner-task-list"></ul>
-      </div>
-      <div class="card glass">
-        <h3>Add a custom task</h3>
-        <form id="add-task-form" class="inline-form">
-          <input type="text" id="new-task-title" placeholder="e.g. Revise SQL Joins" required />
-          <select id="new-task-subject">
-            <option value="">General</option>
-          </select>
-          <button type="submit" class="btn btn-primary">Add</button>
-        </form>
-      </div>
-    </section>
+    <!-- ---------- 180-DAY ROADMAP (merges the old Planner + Master Checklist) ---------- -->
+    <section class="view" id="view-roadmap">
+      <h2 class="view-title">180-Day Roadmap</h2>
+      <p class="muted checklist-subtitle">MIS Executive → Data Analyst / BI Analyst — day-by-day plan with technical tasks, assignments, and Spoken English built in.</p>
 
-    <!-- ---------- MASTER CHECKLIST ---------- -->
-    <section class="view" id="view-checklist">
-      <h2 class="view-title">Master Checklist</h2>
-      <p class="muted checklist-subtitle">KREIS RPC Computer Teacher syllabus — tap a topic to log video/PDF/notes, MCQs, revisions, confidence &amp; time.</p>
-
-      <div class="card glass" id="checklist-summary-card">
-        <div class="p-label"><span>Overall progress</span><span id="checklist-overall-text">0 / 0</span></div>
-        <div class="progress-bar-bg"><div class="progress-bar-fill" id="checklist-overall-fill" style="width:0%"></div></div>
+      <div class="card glass" id="roadmap-summary-card">
+        <div class="p-label"><span>Days completed</span><span id="roadmap-overall-text">0 / 180</span></div>
+        <div class="progress-bar-bg"><div class="progress-bar-fill" id="roadmap-overall-fill" style="width:0%"></div></div>
       </div>
 
-      <input type="search" id="checklist-search" class="full-width-input" placeholder="Search a topic (e.g. Pointers, DBMS, Joins)…" />
+      <div class="filters">
+        <select id="roadmap-phase-filter"><option value="">All phases</option></select>
+        <input type="search" id="roadmap-search" placeholder="Search a topic…" />
+      </div>
 
-      <div id="checklist-sections"></div>
+      <div id="roadmap-days-list"></div>
     </section>
 
     <!-- ---------- RESOURCES ---------- -->
@@ -443,43 +446,75 @@
   </main>
 </div>
 
-<!-- Checklist topic detail modal -->
-<div class="modal-overlay hidden" id="checklist-modal">
-  <div class="modal glass checklist-modal">
-    <h3 id="cm-topic-title">Topic</h3>
-    <p class="r-topic" id="cm-topic-meta"></p>
+<!-- Roadmap day detail modal: today's content + progress tracking -->
+<div class="modal-overlay hidden" id="roadmap-modal">
+  <div class="modal glass roadmap-modal">
+    <p class="r-topic" id="rm-meta">Day 1 · Phase</p>
+    <h3 id="rm-topic">Topic</h3>
 
-    <label class="checkbox-row"><input type="checkbox" id="cm-completed" /> Mark topic as complete</label>
-
-    <div class="cm-toggles">
-      <label class="checkbox-row"><input type="checkbox" id="cm-video" /> 🎥 Video watched</label>
-      <label class="checkbox-row"><input type="checkbox" id="cm-pdf" /> 📄 PDF read</label>
-      <label class="checkbox-row"><input type="checkbox" id="cm-notes" /> 📝 Notes created</label>
+    <div class="rm-section">
+      <p><strong>🎯 Learning Objectives:</strong> <span id="rm-objectives"></span></p>
+      <p><strong>📖 Study Task:</strong> <span id="rm-study"></span></p>
+      <p><strong>🛠️ Hands-on Task:</strong> <span id="rm-handson"></span></p>
+      <p><strong>💼 Business Case:</strong> <span id="rm-business"></span></p>
+      <p><strong>📤 Expected Output:</strong> <span id="rm-output"></span></p>
     </div>
 
-    <div class="form-row">
-      <label>❓ MCQs attempted <input type="number" id="cm-mcq-attempted" min="0" /></label>
-      <label>✅ MCQs correct <input type="number" id="cm-mcq-correct" min="0" /></label>
-    </div>
-    <p class="muted" id="cm-accuracy">Accuracy: —</p>
-
-    <div class="cm-toggles">
-      <label class="checkbox-row"><input type="checkbox" id="cm-rev1" /> 🔄 Revision 1</label>
-      <label class="checkbox-row"><input type="checkbox" id="cm-rev2" /> 🔄 Revision 2</label>
-      <label class="checkbox-row"><input type="checkbox" id="cm-rev3" /> 🔄 Revision 3</label>
+    <div class="rm-checklist">
+      <label class="checkbox-row"><input type="checkbox" id="rm-technical" /> ✅ Technical Learning done</label>
+      <label class="checkbox-row"><input type="checkbox" id="rm-practice" /> 🛠️ Hands-on Practice done</label>
     </div>
 
-    <label>⭐ Confidence
-      <div class="star-picker" id="cm-confidence-picker">
-        <span data-star="1">★</span><span data-star="2">★</span><span data-star="3">★</span><span data-star="4">★</span><span data-star="5">★</span>
-      </div>
-    </label>
+    <div class="rm-section">
+      <p><strong>📝 Assignment:</strong> <span id="rm-assignment-title"></span></p>
+      <p class="muted" id="rm-assignment-desc"></p>
+      <textarea id="rm-assignment-answer" rows="3" placeholder="Write your assignment answer / approach here…"></textarea>
+      <label class="checkbox-row"><input type="checkbox" id="rm-assignment-status" /> Assignment complete</label>
+    </div>
 
-    <label>⏱ Time spent (minutes)<input type="number" id="cm-time" min="0" /></label>
-    <label>📝 Personal remarks<textarea id="cm-remarks" rows="3" placeholder="Anything to remember about this topic…"></textarea></label>
+    <div class="rm-section">
+      <h4>🗣 Spoken English (today's tasks)</h4>
+      <p><strong>🎧 Listening:</strong> <span id="rm-listening"></span></p>
+      <label class="checkbox-row"><input type="checkbox" id="rm-listening-status" /> Listening done</label>
+      <p><strong>🗣️ Speaking:</strong> <span id="rm-speaking"></span></p>
+      <label class="checkbox-row"><input type="checkbox" id="rm-speaking-status" /> Speaking done <a href="#" id="rm-go-speaking-tab">(open Speaking Practice)</a></label>
+      <p><strong>📰 Reading:</strong> <span id="rm-reading"></span></p>
+      <label class="checkbox-row"><input type="checkbox" id="rm-reading-status" /> Reading done</label>
+      <p><strong>✍️ Writing:</strong> <span id="rm-writing"></span></p>
+      <textarea id="rm-writing-answer" rows="3" placeholder="Write your 5-10 sentences here…"></textarea>
+      <label class="checkbox-row"><input type="checkbox" id="rm-writing-status" /> Writing done</label>
+      <p><strong>🧠 Vocabulary:</strong></p>
+      <p class="muted" id="rm-vocabulary"></p>
+      <label class="checkbox-row"><input type="checkbox" id="rm-vocabulary-status" /> Vocabulary learned</label>
+    </div>
 
-    <button class="btn btn-primary" id="cm-save-btn">Save</button>
-    <button class="icon-btn modal-close" id="cm-close-btn">✕</button>
+    <div class="rm-section">
+      <p><strong>🎤 Interview Question of the Day:</strong> <span id="rm-interview-question"></span></p>
+      <label class="checkbox-row"><input type="checkbox" id="rm-interview-status" /> Practiced this question</label>
+      <label>Confidence on this question
+        <div class="star-picker" id="rm-interview-confidence-picker">
+          <span data-star="1">★</span><span data-star="2">★</span><span data-star="3">★</span><span data-star="4">★</span><span data-star="5">★</span>
+        </div>
+      </label>
+    </div>
+
+    <label class="checkbox-row"><input type="checkbox" id="rm-revision-status" /> 🔄 Revision done for today</label>
+
+    <div class="rm-section">
+      <h4>📝 Daily Remarks</h4>
+      <label>What I learned today<textarea id="rm-what-learned" rows="2"></textarea></label>
+      <label>What I found difficult<textarea id="rm-difficulties" rows="2"></textarea></label>
+      <label>What I need to revise<textarea id="rm-revision-needed" rows="2"></textarea></label>
+      <label>Overall confidence today
+        <div class="star-picker" id="rm-confidence-picker">
+          <span data-star="1">★</span><span data-star="2">★</span><span data-star="3">★</span><span data-star="4">★</span><span data-star="5">★</span>
+        </div>
+      </label>
+      <label>Personal remark<textarea id="rm-remarks" rows="2"></textarea></label>
+    </div>
+
+    <button class="btn btn-primary" id="rm-save-btn">Save Progress</button>
+    <button class="icon-btn modal-close" id="rm-close-btn">✕</button>
   </div>
 </div>
 
@@ -510,7 +545,7 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="api.js"></script>
-<script src="app.js"></script>
+<script src="js/api.js"></script>
+<script src="js/app.js"></script>
 </body>
 </html>
