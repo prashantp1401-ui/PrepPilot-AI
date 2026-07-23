@@ -390,6 +390,35 @@ label input, label select { margin-top: 6px; }
 .sp-rec-item audio { width: 100%; margin-bottom: 8px; }
 .sp-rec-item .mini-btn { float: right; }
 
+/* ---------------- Dashboard: Day header + Today's Priority ---------------- */
+.dash-day-header {
+  margin: -6px 0 16px; font-size: .85rem; font-weight: 600; color: var(--primary);
+  text-transform: uppercase; letter-spacing: .04em;
+}
+.today-priority-card h3 { margin: 4px 0 6px; font-size: 1.15rem; }
+.today-priority-card p { margin: 4px 0; font-size: .9rem; }
+.today-priority-card .btn { margin-top: 12px; }
+
+/* ---------------- Roadmap day list ---------------- */
+.rm-day-num {
+  flex-shrink: 0; font-size: .74rem; font-weight: 700; color: var(--primary);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 999px;
+  padding: 3px 9px; white-space: nowrap;
+}
+
+/* ---------------- Roadmap day detail modal ---------------- */
+.roadmap-modal { max-width: 520px; text-align: left; max-height: 88vh; overflow-y: auto; }
+.roadmap-modal h3 { margin: 2px 0 12px; }
+.rm-section {
+  margin: 14px 0; padding: 12px 14px; border-radius: var(--radius-md);
+  background: var(--surface-solid); border: 1px solid var(--border);
+}
+.rm-section h4 { margin: 0 0 10px; font-size: .92rem; }
+.rm-section p { margin: 0 0 8px; font-size: .88rem; line-height: 1.5; }
+.rm-section p:last-child { margin-bottom: 0; }
+.rm-section textarea { margin-top: 6px; margin-bottom: 8px; }
+.rm-checklist { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+
 /* ---------------- Admin dashboard ---------------- */
 .admin-tabs {
   display: flex; gap: 8px; margin-bottom: 16px; overflow-x: auto;
